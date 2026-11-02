@@ -329,21 +329,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream"] }
-serde = { version = "1", features = ["derive"] }
-toml = "0.9"
-url = "2"
-bytes = "1"
-futures-util = "0.3"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-thiserror = "2"
-ipnet = "2"
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
+url = { version = "2", default-features = false, features = ["std"] }
+bytes = { version = "1", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter", "json"] }
+thiserror = { version = "2", default-features = false, features = ["std"] }
+ipnet = { version = "2", default-features = false, features = ["std"] }
 ```
 
-Note: reqwest 0.13 differs from 0.12 in TLS feature names; use the verified `rustls` feature for 0.13. `reqwest::Response::bytes_stream()` requires the `stream` feature. This dependency snippet is a design baseline, not proof that the full project compiles.
+Note: reqwest 0.13 differs from 0.12 in TLS feature names; use the verified `rustls` feature for 0.13. `reqwest::Response::bytes_stream()` requires the `stream` feature. Every direct dependency disables default features and enables only what the code uses; `Cargo.toml` is authoritative. The project's Rust version floor is 1.99; this is a project policy, not merely the highest MSRV of the dependency graph.
 
 Suggested client construction:
 
