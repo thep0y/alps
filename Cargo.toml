@@ -1,0 +1,61 @@
+[package]
+name = "alps"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "ALPS - AllowList Proxy Service"
+license = "MIT"
+
+[dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json"] }
+tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "stream"] }
+hyper = { version = "1.12", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["server-auto", "service", "server-graceful", "tokio"] }
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
+serde = { version = "1.0.229", default-features = false, features = ["std", "derive"] }
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
+url = { version = "2.5.8", default-features = false, features = ["std"] }
+bytes = { version = "1.12", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std", "async-await"] }
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "fmt", "env-filter", "json"] }
+thiserror = { version = "2.0.21", default-features = false, features = ["std"] }
+ipnet = { version = "2.12", default-features = false, features = ["std"] }
+percent-encoding = { version = "2.3.2", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
+subtle = { version = "2.6.1", default-features = false, features = ["std"] }
+hmac = { version = "0.13", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+base64 = { version = "0.23", default-features = false, features = ["std"] }
+arc-swap = { version = "1.9", default-features = false }
+prometheus = { version = "0.14", default-features = false }
+
+[dev-dependencies]
+http-body-util = { version = "0.1.5", default-features = false }
+tokio = { version = "1.54", default-features = false, features = ["test-util"] }
+
+[features]
+test-util = []
+
+# Production profile: thin LTO keeps build times moderate while codegen-units=1
+# gives the optimizer a whole-crate view. Symbols are stripped for the shipped
+# binary; panic stays "unwind" so a panicking task does not abort the process.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = 0
+strip = "symbols"
+panic = "unwind"
+incremental = false
+
+[[example]]
+name = "dev_proxy"
+path = "examples/dev_proxy.rs"
+required-features = ["test-util"]
+
+[[example]]
+name = "perf_fixture"
+path = "examples/perf_fixture.rs"
+required-features = ["test-util"]

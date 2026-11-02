@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+# Test-only image: streaming upstream + ALPS with a loopback-permissive resolver.
+# Build (from the repository root):
+#   podman build --network=host -f deploy/Dockerfile.perf -t alps-perf .
+# Run (one CPU and a 256 MiB address-space limit):
+#   taskset -c 0 podman run --rm -p 18080:18080 -p 18081:18081 \
+#     --memory=256m -e PERF_FILE_MB=32 alps-perf
+# Never deploy this image.
+
+ARG RUST_IMAGE=rust:1.99-bookworm
+ARG RUNTIME_IMAGE=debian:bookworm-slim
+
+FROM ${RUST_IMAGE} AS builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends cmake clang ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY examples ./examples
+RUN cargo build --release --locked --features test-util --example perf_fixture
+
+FROM ${RUNTIME_IMAGE}
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /src/target/release/examples/perf_fixture /usr/local/bin/perf_fixture
+COPY deploy/perf-entrypoint.sh /usr/local/bin/perf-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/perf-entrypoint.sh
+USER 65534:65534
+EXPOSE 18080 18081
+ENTRYPOINT ["/usr/local/bin/perf-entrypoint.sh"]

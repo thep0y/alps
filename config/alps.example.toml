@@ -1,0 +1,82 @@
+# ALPS example configuration.
+# Copy to config/alps.toml and edit the allowlist. Secrets come from the
+# environment, never from this file:
+#   ALPS_API_TOKEN=<at least 16 bytes>          (auth.mode = "bearer")
+#   ALPS_SIGNING_SECRET=<base64 or 32+ raw bytes> (signing.enabled = true)
+#   ALPS_SIGNING_SECRET_PREVIOUS=<optional rotation secret>
+
+[server]
+listen = "0.0.0.0:8080"
+shutdown_grace_secs = 20
+header_read_timeout_secs = 10
+max_header_bytes = 16384
+max_connections = 512
+http2 = false                     # enable h2c (prior knowledge) on the main listener
+http2_max_concurrent_streams = 100
+
+[proxy]
+allow_http = false
+max_redirects = 5
+max_url_length = 8192
+connect_timeout_secs = 5
+response_header_timeout_secs = 15
+read_idle_timeout_secs = 30
+max_response_bytes = 0            # 0 = unlimited
+forward_accept = false
+user_agent = "alps/0.1"
+
+[limits]
+max_active_streams = 100
+max_active_streams_per_host = 20
+max_idle_connections_per_host = 3
+idle_connection_timeout_secs = 30
+max_requests_per_second = 0       # 0 = disabled
+max_requests_per_second_per_ip = 0  # 0 = disabled
+max_egress_bytes_per_second = 0   # 0 = disabled; global response-body shaping
+trusted_proxies = []              # e.g. ["127.0.0.1/32"]; enables X-Forwarded-For
+
+[security]
+# These three switches are fixed to true in this release. Setting them to
+# false is a startup error.
+block_non_global_ips = true
+block_ip_literal_hosts = true
+no_system_proxy = true
+default_content_disposition = "attachment"
+trusted_network_only = false      # required true for auth.mode="none" on a public bind
+
+[auth]
+mode = "bearer"                   # "bearer" (default) or "none"
+
+[signing]
+enabled = false                   # requires ALPS_SIGNING_SECRET
+default_ttl_secs = 300
+max_ttl_secs = 86400
+max_token_bytes = 4096
+
+[metrics]
+enabled = false                   # exposes /metrics on a separate listener
+listen = "127.0.0.1:9090"
+
+[cors]
+# Exact origins only; empty disables CORS. Never use "*".
+allowed_origins = []              # e.g. ["https://app.example.org"]
+max_age_secs = 600
+
+[[allowlist]]
+host = "files.example.org"
+include_subdomains = false
+schemes = ["https"]
+ports = [443]
+path_prefixes = []                # empty = all paths; e.g. ["/releases/", "/pub/"]
+
+[[allowlist]]
+host = "downloads.example.net"
+include_subdomains = false
+schemes = ["https"]
+ports = [443]
+path_prefixes = ["/downloads/"]
+
+[logging]
+level = "info"
+format = "json"
+redact_url_query = true           # fixed true
