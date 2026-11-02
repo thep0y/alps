@@ -100,7 +100,7 @@ The `release` workflow may commit a version-only bump to `main`. That commit is 
 
 ## Enforcement
 
-- Branch protection on `main` should reject direct pushes and require pull requests and CI.
+- Branch protection on `main` should reject direct pushes and require pull requests and the `ci-success` check.
 - Reviewers must verify the pull request base is `main` and that the branch was cut from `main`.
-- CI runs on pull requests and on `main` after merge.
+- Validation runs on pull requests; `main` runs the `warm-cache` workflow (tests and release builds) after merge.
 - A change that bypasses this workflow is not ready to merge.
