@@ -1,0 +1,67 @@
+name: warm-cache
+
+# Post-merge cache warming is a separate concern from PR validation.
+# This workflow is the only writer of the Cargo caches; pull requests restore
+# them read-only. Debug and release use separate shared keys because the
+# release profile (thin LTO, codegen-units=1) produces incompatible artifacts.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warm-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: debug
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test --all-features
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo build --release --locked
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: msrv
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo build --locked
+
+  cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: cross-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cross build --release --locked --target aarch64-unknown-linux-gnu

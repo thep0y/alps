@@ -1,8 +1,9 @@
 name: ci
 
+# Pull-request validation only. Pushes to main are handled by warm-cache.yml.
+# Keeping these triggers in separate workflows avoids the same jobs running
+# twice for every pull-request update (once for push, once for pull_request).
 on:
-  push:
-    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -10,27 +11,35 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      # Debug cache. Saved only when code lands on main, so PRs and feature
-      # branches restore the warm cache instead of re-downloading crates.
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: alps-v1
           shared-key: debug
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          save-if: false
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: debug
+          save-if: false
       - run: cargo test --all-features
 
   release-build:
@@ -38,14 +47,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      # Release cache is separate from the debug cache; the release profile
-      # uses thin LTO and codegen-units=1, so mixing profiles would thrash.
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: alps-v1
           shared-key: release
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          save-if: false
       - run: cargo build --release --locked
 
   msrv:
@@ -57,19 +63,8 @@ jobs:
         with:
           prefix-key: alps-v1
           shared-key: msrv
-          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          save-if: false
       - run: cargo build --locked
-
-  audit:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
   cross:
     runs-on: ubuntu-latest
@@ -81,8 +76,19 @@ jobs:
         with:
           prefix-key: alps-v1
           shared-key: cross-release
-          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          save-if: false
       - run: cross build --release --locked --target aarch64-unknown-linux-gnu
+
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   docker:
     runs-on: ubuntu-latest
@@ -96,3 +102,17 @@ jobs:
           tags: alps:ci
           cache-from: type=gha,scope=alps-docker
           cache-to: type=gha,mode=max,scope=alps-docker
+
+  ci-success:
+    if: ${{ always() }}
+    needs: [lint, test, release-build, msrv, cross, audit, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every validation job to pass
+        shell: bash
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "job results: ${results}"
+          case "${results}" in
+            *failure*|*cancelled*|*skipped*) exit 1 ;;
+          esac

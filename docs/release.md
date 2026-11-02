@@ -2,20 +2,27 @@
 
 ## 1. Cache warming on main
 
-The CI workflow uses GitHub Actions caches for Cargo's registry and target directory:
+Cache warming is a separate workflow from pull-request validation:
 
-- **debug cache**: warmed by the `test` job (fmt, clippy, unit/integration tests) using `shared-key: debug`.
-- **release cache**: warmed by the `release-build` job using `shared-key: release`.
+- [`.github/workflows/warm-cache.yml`](../.github/workflows/warm-cache.yml) runs on pushes to `main` and is the only cache writer.
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on `pull_request` only; it restores caches read-only (`save-if: false`).
+
+The cache keys are:
+
+- **debug cache**: `shared-key: debug`, warmed by `cargo test --all-features`.
+- **release cache**: `shared-key: release`, warmed by `cargo build --release --locked`.
 - **MSRV cache**: `shared-key: msrv`.
 - **cross cache**: `shared-key: cross-release`.
 
-Caches are **saved only on pushes to `main`**:
+`warm-cache` saves only for `main`:
 
 ```yaml
-save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+save-if: ${{ github.ref == 'refs/heads/main' }}
 ```
 
 Pull requests and feature branches restore the main caches but never overwrite them. The two profiles use different `shared-key` values because the release profile uses thin LTO and `codegen-units = 1`; mixing debug and release artifacts would cause constant cache misses.
+
+Keeping `push` and `pull_request` in separate workflows is intentional: a feature-branch push followed by a pull-request synchronization would otherwise run every validation job twice.
 
 The Docker build uses a separate GitHub Actions cache scope (`alps-docker`).
 
