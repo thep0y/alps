@@ -1,73 +1,174 @@
-# ALPS example configuration.
-# Copy to config/alps.toml and edit the allowlist. Secrets come from the
-# environment, never from this file:
-#   ALPS_API_TOKEN=<at least 16 bytes>          (auth.mode = "bearer")
-#   ALPS_SIGNING_SECRET=<base64 or 32+ raw bytes> (signing.enabled = true)
-#   ALPS_SIGNING_SECRET_PREVIOUS=<optional rotation secret>
+# ALPS configuration reference example.
+#
+# Copy this file to config/alps.toml and edit at least the allowlist:
+#   cp config/alps.example.toml config/alps.toml
+#
+# Loading and validation:
+#   - Path precedence: --config PATH > ALPS_CONFIG > ./alps.toml.
+#   - TOML is parsed strictly: unknown keys and wrong types fail startup.
+#   - Every value is validated before the listeners bind.
+#   - Validate without starting: alps --config config/alps.toml --check-config
+#
+# Secrets are never stored in this file; they are read from the environment:
+#   ALPS_API_TOKEN               >= 16 bytes, required for auth.mode = "bearer"
+#   ALPS_SIGNING_SECRET          base64 or >= 32 raw bytes, required for signing
+#   ALPS_SIGNING_SECRET_PREVIOUS optional previous key for rotation; requires current
+#   ALPS_CONFIG                  optional configuration path instead of --config
+#
+# All values shown below are the defaults unless a comment says otherwise.
+# The full field reference is docs/configuration.md.
 
 [server]
+# Proxy listener address and port. Must parse as a SocketAddr.
+# Default: 0.0.0.0:8080. Changing it requires a restart.
 listen = "0.0.0.0:8080"
+# Graceful-shutdown deadline in seconds (1-300). In-flight requests get this
+# long to finish before remaining connections are aborted. Default: 20.
 shutdown_grace_secs = 20
+# Maximum time in seconds to read the request headers (1-60). This is a
+# slowloris defense and applies to every new HTTP/1.1 connection. Default: 10.
 header_read_timeout_secs = 10
+# Maximum inbound header block size in bytes (8192-65536). Default: 16384.
 max_header_bytes = 16384
+# Maximum number of simultaneously accepted connections (1-65535). Excess
+# connections are closed immediately rather than queued. Default: 512.
 max_connections = 512
-http2 = false                     # enable h2c (prior knowledge) on the main listener
+# Enable cleartext HTTP/2 (h2c, prior knowledge) on the proxy listener.
+# HTTP/1.1 remains available. Default: false. Usually TLS/h2 is terminated at
+# the reverse proxy and this is only needed for an internal h2c hop.
+http2 = false
+# Maximum concurrent HTTP/2 streams per connection (1-1000), used only when
+# http2 is enabled. Default: 100.
 http2_max_concurrent_streams = 100
 
 [proxy]
+# Allow http:// targets and http schemes in allowlist rules. Default: false.
+# Keep false outside an isolated/trusted network.
 allow_http = false
+# Maximum upstream redirects to follow (0-10). 0 disables following; a 3xx
+# then fails with upstream_redirect_error. Default: 5.
 max_redirects = 5
+# Maximum decoded target URL length in bytes (128-65536). Default: 8192.
 max_url_length = 8192
+# DNS + TCP connect timeout in seconds (1-300). Default: 5.
 connect_timeout_secs = 5
+# Timeout in seconds for the upstream response headers (1-300). Default: 15.
 response_header_timeout_secs = 15
+# Per-read idle timeout in seconds for the upstream body (1-300); it resets
+# after every successful read. Default: 30.
 read_idle_timeout_secs = 30
-max_response_bytes = 0            # 0 = unlimited
+# Maximum upstream response body size in bytes. 0 means unlimited; otherwise
+# the minimum is 1024. A known oversized Content-Length is rejected before
+# headers are sent; an unknown oversized stream is terminated mid-copy.
+max_response_bytes = 0
+# Forward the client's Accept header upstream. All other client headers are
+# filtered. Default: false.
 forward_accept = false
+# User-Agent sent upstream. 1-256 bytes, no control characters.
+# Default: alps/<package version>. The value below is an example override.
 user_agent = "alps/0.1"
 
 [limits]
+# Maximum active response streams across all hosts (1-1000000). Requests over
+# the limit fail fast with 503 capacity_exceeded; they are not queued.
+# Default: 100.
 max_active_streams = 100
+# Maximum active streams per target host (1-1000000, and <= the global limit).
+# Default: 20.
 max_active_streams_per_host = 20
+# Maximum idle upstream connections kept per host (1-64). Default: 3.
 max_idle_connections_per_host = 3
+# Idle upstream connection timeout in seconds (1-600). Default: 30.
 idle_connection_timeout_secs = 30
-max_requests_per_second = 0       # 0 = disabled
-max_requests_per_second_per_ip = 0  # 0 = disabled
-max_egress_bytes_per_second = 0   # 0 = disabled; global response-body shaping
-trusted_proxies = []              # e.g. ["127.0.0.1/32"]; enables X-Forwarded-For
+# Global request rate limit in requests/second. 0 disables it; over-limit
+# requests receive 429 rate_limited. Default: 0.
+max_requests_per_second = 0
+# Per-client-IP request rate limit in requests/second. 0 disables it. The
+# client IP is the TCP peer unless trusted_proxies is configured. Default: 0.
+max_requests_per_second_per_ip = 0
+# Global egress shaping in bytes/second across all response bodies. 0 disables.
+# This throttles bytes sent to clients, not upstream ingress. Default: 0.
+max_egress_bytes_per_second = 0
+# CIDRs of reverse proxies whose X-Forwarded-For is trusted for per-IP rate
+# limiting. Empty means only the TCP peer address is used. Never list public
+# or untrusted peers. Examples: ["10.0.0.0/8", "127.0.0.1/32"].
+trusted_proxies = []
 
 [security]
-# These three switches are fixed to true in this release. Setting them to
-# false is a startup error.
+# These three safety switches are fixed to true in this release. Setting any
+# of them to false is a startup error and cannot be used to weaken SSRF
+# defenses. They are shown explicitly so the effective policy is obvious.
 block_non_global_ips = true
 block_ip_literal_hosts = true
 no_system_proxy = true
+# Only "attachment" is accepted in this release. Upstream Content-Disposition
+# is sanitized; unsafe values fall back to this disposition.
 default_content_disposition = "attachment"
-trusted_network_only = false      # required true for auth.mode="none" on a public bind
+# Explicitly declare that the entire listener is reachable only by trusted
+# clients. Required for auth.mode = "none" on a non-loopback listener; it does
+# not relax allowlist, DNS or IP checks. Default: false.
+trusted_network_only = false
 
 [auth]
-mode = "bearer"                   # "bearer" (default) or "none"
+# "bearer": require Authorization: Bearer $ALPS_API_TOKEN (>= 16 bytes).
+# "none": no request authentication. Allowed only on a loopback listener, or
+# on a non-loopback listener with security.trusted_network_only = true.
+# Default: "bearer".
+mode = "bearer"
 
 [signing]
-enabled = false                   # requires ALPS_SIGNING_SECRET
+# Enable HMAC-signed download links (/p/{token}) and POST /v1/sign.
+# Requires ALPS_SIGNING_SECRET; ALPS_SIGNING_SECRET_PREVIOUS is optional for
+# rotation. Default: false.
+enabled = false
+# Default signed-link TTL in seconds (1-31536000). Default: 300.
 default_ttl_secs = 300
+# Maximum accepted/issued TTL in seconds (1-31536000); must be >= default.
+# Default: 86400.
 max_ttl_secs = 86400
+# Maximum signed-token length in bytes (512-16384). Default: 4096.
 max_token_bytes = 4096
 
 [metrics]
-enabled = false                   # exposes /metrics on a separate listener
+# Expose Prometheus metrics on a separate admin listener. Keep it on loopback
+# or a private interface; there is no authentication on this listener.
+# Default: false.
+enabled = false
+# Admin listen address. Must differ from server.listen when enabled.
+# Default: 127.0.0.1:9090. Changing it requires a restart.
 listen = "127.0.0.1:9090"
 
 [cors]
-# Exact origins only; empty disables CORS. Never use "*".
-allowed_origins = []              # e.g. ["https://app.example.org"]
+# Exact origins allowed to call the browser-facing API; empty disables CORS.
+# Each entry is scheme://host[:port] only: no wildcard, path, query, userinfo
+# or fragment. Duplicates are removed and entries are normalized. Default: [].
+allowed_origins = []
+# Access-Control-Max-Age for preflight responses in seconds (0-86400).
+# Default: 600.
 max_age_secs = 600
 
+# One or more allowlist rules. A target is permitted only if at least one rule
+# matches its scheme, host and port, and (if set) its path prefix. An empty
+# allowlist is accepted with a warning, but every proxy request is denied.
+# Rules are normalized: lowercase, trailing dot removed, IDNA to ASCII. IP
+# literals, wildcards, userinfo, paths and non-DNS hosts are rejected.
+
 [[allowlist]]
+# Required DNS domain. Subdomain matching uses label boundaries, not string
+# suffix matching: files.example.org does not match notfiles.example.org.
 host = "files.example.org"
+# Match host itself and any label below it. Default: false.
 include_subdomains = false
+# Allowed schemes (subset of "https", "http"). "http" requires proxy.allow_http.
+# Default: ["https"].
 schemes = ["https"]
+# Allowed destination ports; non-empty, 1-65535. Default: [443].
 ports = [443]
-path_prefixes = []                # empty = all paths; e.g. ["/releases/", "/pub/"]
+# Literal path prefixes on the normalized URL path; empty means all paths.
+# At most 16 entries, each starts with "/", is <= 1024 bytes, and contains no
+# query/fragment/control/whitespace or "."/".." segments. Trailing slashes
+# matter: "/releases/" does not match "/releases".
+path_prefixes = []                # e.g. ["/releases/", "/pub/"]
 
 [[allowlist]]
 host = "downloads.example.net"
@@ -77,6 +178,11 @@ ports = [443]
 path_prefixes = ["/downloads/"]
 
 [logging]
+# Tracing filter using EnvFilter syntax, e.g. "info", "debug",
+# "alps=debug,tower=warn". Invalid filters fail startup. Default: "info".
 level = "info"
+# "json" for structured production logs, "text" for local development.
+# Default: "json".
 format = "json"
-redact_url_query = true           # fixed true
+# URL query redaction is fixed to true; setting it to false fails startup.
+redact_url_query = true

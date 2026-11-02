@@ -151,7 +151,10 @@ struct Args {
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut config = PathBuf::from("alps.toml");
+    let mut config = std::env::var_os("ALPS_CONFIG")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("alps.toml"));
     let mut check_config = false;
     let mut help = false;
     let mut args = std::env::args().skip(1);
@@ -180,7 +183,7 @@ fn parse_args() -> Result<Args, String> {
 
 fn print_usage() {
     println!(
-        "alps {}\n\nUSAGE:\n    alps [OPTIONS]\n\nOPTIONS:\n    --config <PATH>     Configuration file (default: alps.toml)\n    --check-config      Validate configuration and exit\n    -h, --help          Print this help",
+        "alps {}\n\nUSAGE:\n    alps [OPTIONS]\n\nOPTIONS:\n    --config <PATH>     Configuration file (default: ALPS_CONFIG or alps.toml)\n    --check-config      Validate configuration and exit\n    -h, --help          Print this help",
         env!("CARGO_PKG_VERSION")
     );
 }

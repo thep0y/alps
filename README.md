@@ -91,7 +91,7 @@ Safety switches that cannot be disabled (startup fails if set to `false`): `secu
 
 `auth.mode = "none"` is allowed only on a loopback listener, or on a non-loopback listener when `security.trusted_network_only = true` is explicitly set.
 
-See `config/alps.example.toml` for examples and field defaults.
+See [docs/configuration.md](docs/configuration.md) for the complete field reference, constraints and examples, and `config/alps.example.toml` for an annotated configuration.
 
 ## Security model
 
