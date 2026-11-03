@@ -28,6 +28,17 @@ The Docker build uses a separate GitHub Actions cache scope (`alps-docker`).
 
 > Forks do not receive the base repository's Actions caches by design; their first run must download dependencies.
 
+### Auto-merge
+
+The `automerge` label enables native GitHub auto-merge for a pull request:
+
+- The PR must be non-draft and come from this repository (fork PRs are skipped).
+- The `automerge` job waits for `ci-success` and then runs `gh pr merge --auto --squash`.
+- Native auto-merge still honors branch protection and required reviews; it does not bypass them.
+- The repository must allow auto-merge (`allow_auto_merge = true`).
+- The job runs on `labeled`, `opened`, `synchronize`, `reopened` and `ready_for_review` events, so adding the label after CI has passed triggers the merge.
+- Removing the label after auto-merge is enabled does not cancel it; disable auto-merge from the PR page if needed.
+
 ## 2. Release workflow
 
 `.github/workflows/release.yml` is a manual `workflow_dispatch` workflow with three inputs:

@@ -1,10 +1,11 @@
 name: ci
 
-# Pull-request validation only. Pushes to main are handled by warm-cache.yml.
-# Keeping these triggers in separate workflows avoids the same jobs running
-# twice for every pull-request update (once for push, once for pull_request).
+# Pull-request validation, plus optional auto-merge when the PR carries the
+# "automerge" label. Pushes to main are handled by warm-cache.yml; keeping
+# those triggers separate avoids running validation twice per PR update.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_dispatch:
 
 permissions:
@@ -117,3 +118,29 @@ jobs:
           case "${results}" in
             *failure*|*cancelled*|*skipped*) exit 1 ;;
           esac
+
+  automerge:
+    needs: [ci-success]
+    if: >
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'automerge')
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          enabled="$(gh pr view "${PR_URL}" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+          if [[ "${enabled}" == "true" ]]; then
+            echo "auto-merge is already enabled"
+          else
+            gh pr merge --auto --squash "${PR_URL}"
+          fi
