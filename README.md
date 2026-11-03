@@ -149,6 +149,7 @@ Local load testing: `cargo run --features test-util --example dev_proxy` starts 
 - `dry_run` performs the bump, validation and builds without committing or publishing.
 - Branch protection may require a `RELEASE_TOKEN` secret (contents: write) or an explicit Actions bypass for the version-bump commit.
 - Require the `ci-success` check for pull requests; it aggregates lint, test, release-build, msrv, cross, audit and docker.
+- Add the `automerge` label to a non-draft PR from this repository; after `ci-success`, CI enables native squash auto-merge. Branch protection and required reviews still apply.
 
 See [docs/release.md](docs/release.md) for cache keys, bump semantics, required permissions and recovery steps.
 
