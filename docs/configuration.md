@@ -8,7 +8,12 @@ The configuration path is resolved in this order:
 
 1. `--config <PATH>` or `--config=<PATH>` on the command line.
 2. The `ALPS_CONFIG` environment variable.
-3. `./alps.toml`.
+3. The first existing path in this order:
+   - `$HOME/.coinfig/alps/alps.toml`
+   - `$HOME/.alps.toml`
+   - `<directory containing the alps binary>/alps.toml`
+
+If no default file exists, ALPS attempts the binary-directory path and reports that path in the startup error. A path supplied by `--config` or `ALPS_CONFIG` is used as-is and is not subject to this search.
 
 The file must be valid UTF-8 TOML. Unknown keys, wrong types and values outside the documented ranges are startup errors; there is no permissive fallback.
 

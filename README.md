@@ -85,6 +85,8 @@ Configuration is TOML, validated at startup; unknown fields fail startup. Secret
 - `ALPS_SIGNING_SECRET_PREVIOUS`: optional; used to validate old tokens during key rotation.
 - `ALPS_CONFIG`: optional alternative to `--config`.
 
+When neither is set, startup uses the first existing file in this order: `$HOME/.coinfig/alps/alps.toml`, `$HOME/.alps.toml`, then `<binary directory>/alps.toml`.
+
 Additional blocks: `[cors] allowed_origins` (exact origins; empty disables CORS), `[server] http2`, per-rule `path_prefixes`, and `limits.max_egress_bytes_per_second`.
 
 Safety switches that cannot be disabled (startup fails if set to `false`): `security.block_non_global_ips`, `block_ip_literal_hosts`, `no_system_proxy`, `logging.redact_url_query`; `default_content_disposition` only accepts `attachment`.
