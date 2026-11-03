@@ -138,9 +138,9 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
-          state="$(gh pr view "${PR_URL}" --json autoMergeRequest --jq '.autoMergeRequest')"
-          if [[ "${state}" == "null" ]]; then
-            gh pr merge --auto --squash "${PR_URL}"
-          else
+          enabled="$(gh pr view "${PR_URL}" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+          if [[ "${enabled}" == "true" ]]; then
             echo "auto-merge is already enabled"
+          else
+            gh pr merge --auto --squash "${PR_URL}"
           fi
