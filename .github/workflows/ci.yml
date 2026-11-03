@@ -131,16 +131,16 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      - name: Enable auto-merge
+      - name: Squash-merge and delete the head branch
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
-          enabled="$(gh pr view "${PR_URL}" --json autoMergeRequest --jq '.autoMergeRequest != null')"
-          if [[ "${enabled}" == "true" ]]; then
-            echo "auto-merge is already enabled"
-          else
-            gh pr merge --auto --squash "${PR_URL}"
+          state="$(gh pr view "${PR_URL}" --json state --jq '.state')"
+          if [[ "${state}" != "OPEN" ]]; then
+            echo "PR is ${state}; nothing to merge"
+            exit 0
           fi
+          gh pr merge --squash --delete-branch "${PR_URL}"
