@@ -30,14 +30,13 @@ The Docker build uses a separate GitHub Actions cache scope (`alps-docker`).
 
 ### Auto-merge
 
-The `automerge` label enables native GitHub auto-merge for a pull request:
+The `automerge` label squash-merges a pull request after CI passes:
 
 - The PR must be non-draft and come from this repository (fork PRs are skipped).
-- The `automerge` job waits for `ci-success` and then runs `gh pr merge --auto --squash`.
-- Native auto-merge still honors branch protection and required reviews; it does not bypass them.
-- The repository must allow auto-merge (`allow_auto_merge = true`).
+- The `automerge` job waits for `ci-success` and then runs `gh pr merge --squash --delete-branch`.
+- Branch protection and required reviews are still enforced by GitHub. If the PR is not currently mergeable, the job fails instead of queueing a deferred auto-merge.
 - The job runs on `labeled`, `opened`, `synchronize`, `reopened` and `ready_for_review` events, so adding the label after CI has passed triggers the merge.
-- Removing the label after auto-merge is enabled does not cancel it; disable auto-merge from the PR page if needed.
+- Deleting the head branch in the merge call is intentional: the repository's automatic deletion setting is not applied to every API/auto-merge path, so the workflow performs it explicitly.
 
 ### Branch cleanup
 
