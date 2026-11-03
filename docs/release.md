@@ -39,6 +39,20 @@ The `automerge` label enables native GitHub auto-merge for a pull request:
 - The job runs on `labeled`, `opened`, `synchronize`, `reopened` and `ready_for_review` events, so adding the label after CI has passed triggers the merge.
 - Removing the label after auto-merge is enabled does not cancel it; disable auto-merge from the PR page if needed.
 
+### Branch cleanup
+
+The repository setting **Automatically delete head branches** is enabled. [`.github/workflows/cleanup-branches.yml`](../.github/workflows/cleanup-branches.yml) is a safety net:
+
+- On `pull_request: closed`, it deletes the head branch only when the PR was merged, comes from this repository, is not the default branch, and the branch still points at the merged head SHA.
+- `workflow_dispatch` runs a sweep over merged PRs and deletes branches that still exist, skipping the default branch, branches with an open PR, and branches that moved after their PR was merged.
+- The manual sweep supports `dry_run = true`.
+- An already-deleted branch is treated as success, so this does not conflict with GitHub's automatic deletion.
+
+```bash
+gh workflow run cleanup-branches.yml -f dry_run=true
+gh workflow run cleanup-branches.yml
+```
+
 ## 2. Release workflow
 
 `.github/workflows/release.yml` is a manual `workflow_dispatch` workflow with three inputs:
