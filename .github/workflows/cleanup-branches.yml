@@ -7,6 +7,8 @@ name: cleanup-branches
 on:
   pull_request:
     types: [closed]
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -53,7 +55,7 @@ jobs:
           echo "deleted ${BRANCH}"
 
   sweep-merged-branches:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - name: Delete branches belonging to merged PRs
@@ -65,9 +67,9 @@ jobs:
         run: |
           set -euo pipefail
           default_branch="$(gh repo view "${REPO}" --json defaultBranchRef --jq '.defaultBranchRef.name')"
-          open_heads="$(gh pr list --state open --limit 1000 --json headRefName --jq '.[].headRefName')"
+          open_heads="$(gh pr list --repo "${REPO}" --state open --limit 1000 --json headRefName --jq '.[].headRefName')"
 
-          gh pr list --state merged --limit 1000 \
+          gh pr list --repo "${REPO}" --state merged --limit 1000 \
             --json number,headRefName,headRefOid,headRepository,headRepositoryOwner \
             --jq '.[] | [.number, .headRefName, .headRefOid, .headRepository.name, .headRepositoryOwner.login] | @tsv' |
           while IFS=$'\t' read -r number branch sha repository_name owner; do

@@ -44,7 +44,7 @@ The `automerge` label enables native GitHub auto-merge for a pull request:
 The repository setting **Automatically delete head branches** is enabled. [`.github/workflows/cleanup-branches.yml`](../.github/workflows/cleanup-branches.yml) is a safety net:
 
 - On `pull_request: closed`, it deletes the head branch only when the PR was merged, comes from this repository, is not the default branch, and the branch still points at the merged head SHA.
-- `workflow_dispatch` runs a sweep over merged PRs and deletes branches that still exist, skipping the default branch, branches with an open PR, and branches that moved after their PR was merged.
+- `push` to `main` and `workflow_dispatch` run a sweep over merged PRs and delete branches that still exist, skipping the default branch, branches with an open PR, and branches that moved after their PR was merged. The push trigger also handles the merge of the PR that introduced this workflow, which cannot receive its own `closed` event from the old default-branch workflow.
 - The manual sweep supports `dry_run = true`.
 - An already-deleted branch is treated as success, so this does not conflict with GitHub's automatic deletion.
 
