@@ -112,6 +112,16 @@ jobs:
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
           ls -l dist
 
+      - name: Generate categorized release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_notes.py --tag "${TAG}" > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
       - name: Commit version bump to main
         if: ${{ !inputs.dry_run }}
         shell: bash
@@ -140,7 +150,7 @@ jobs:
           set -euo pipefail
           git tag -a "${TAG}" -m "ALPS ${TAG}"
           git push origin "${TAG}"
-          args=(--title "ALPS ${TAG}" --generate-notes)
+          args=(--title "ALPS ${TAG}" --notes-file RELEASE_NOTES.md)
           if [[ "${PRERELEASE}" == "true" ]]; then
             args+=(--prerelease)
           fi

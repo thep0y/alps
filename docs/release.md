@@ -38,7 +38,7 @@ The Docker build uses a separate GitHub Actions cache scope (`alps-docker`).
 | `kind` | `stable`, `alpha`, `beta` | Release type |
 | `dry_run` | boolean | Run validation and builds without committing, tagging or publishing |
 
-It checks out `main`, bumps the version, validates, builds x86_64 and aarch64 binaries, commits the version change to `main`, creates an annotated `v<version>` tag, and publishes a GitHub release with generated notes and tarball/checksum assets. Alpha/beta versions are marked as pre-releases.
+It checks out `main`, bumps the version, validates, builds x86_64 and aarch64 binaries, commits the version change to `main`, creates an annotated `v<version>` tag, and publishes a GitHub release with categorized notes and tarball/checksum assets. Alpha/beta versions are marked as pre-releases.
 
 ### Version bump semantics
 
@@ -60,6 +60,33 @@ It checks out `main`, bumps the version, validates, builds x86_64 and aarch64 bi
 `bump` selects the target core; `kind` selects stable/alpha/beta. On an existing pre-release, `patch` keeps the current core (so it can increment, switch the identifier, or finalize with `stable`), while `minor`/`major` move to the next core. A stable version never guesses a pre-release core: `kind = alpha|beta` is always combined with an explicit `bump`.
 
 A stable release after a beta is normally made with `bump = patch`, `kind = stable`.
+
+### Release notes
+
+`scripts/release_notes.py` generates the release body before the release is published:
+
+1. The previous non-draft GitHub release is selected (the current tag is skipped if it already exists); with no previous release, the whole history is used.
+2. Commits in `<previous>..HEAD` are resolved to merged pull requests through the GitHub API.
+3. Each PR title is classified by its Conventional Commits prefix:
+
+| Section | PR title types |
+|---|---|
+| ⚠ Breaking Changes | `!` before the colon, or `BREAKING CHANGE:` in the PR body |
+| 🚀 Features | `feat`, `feature` |
+| 🐛 Bug Fixes | `fix`, `hotfix`, `bugfix` |
+| ⚡ Performance | `perf` |
+| ♻ Refactoring | `refactor` |
+| 📝 Documentation | `docs`, `doc` |
+| 🧪 Tests | `test`, `tests` |
+| 🏗 Build | `build` |
+| ⚙ CI | `ci` |
+| 🧹 Chores | `chore`, `deps`, `release` |
+| ⏪ Reverts | `revert` |
+| 📦 Other Changes | anything without a recognized prefix |
+
+Breaking entries appear only in the Breaking Changes section. The notes show the cleaned PR title, PR link and author, plus a Full Changelog compare link. Direct commits without an associated merged PR are omitted.
+
+The generated file is passed to `gh release create --notes-file`; it is not uploaded as an asset. If notes generation fails, the workflow stops before committing or publishing.
 
 ### Required repository settings
 
@@ -85,4 +112,7 @@ python3 scripts/bump_version.py --bump patch --kind alpha   # existing pre-relea
 python3 scripts/bump_version.py --bump minor --kind beta --write
 cargo check --locked --all-features
 cargo test --all-features
+
+# Preview categorized notes for the next tag (requires gh auth)
+python3 scripts/release_notes.py --tag v0.1.2-alpha.1
 ```
