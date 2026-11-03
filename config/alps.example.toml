@@ -4,7 +4,8 @@
 #   cp config/alps.example.toml config/alps.toml
 #
 # Loading and validation:
-#   - Path precedence: --config PATH > ALPS_CONFIG > ./alps.toml.
+#   - Path precedence: --config PATH > ALPS_CONFIG > the first existing file in
+#     $HOME/.coinfig/alps/alps.toml, $HOME/.alps.toml, <binary dir>/alps.toml.
 #   - TOML is parsed strictly: unknown keys and wrong types fail startup.
 #   - Every value is validated before the listeners bind.
 #   - Validate without starting: alps --config config/alps.toml --check-config

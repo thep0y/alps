@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -153,8 +153,7 @@ struct Args {
 fn parse_args() -> Result<Args, String> {
     let mut config = std::env::var_os("ALPS_CONFIG")
         .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("alps.toml"));
+        .map(PathBuf::from);
     let mut check_config = false;
     let mut help = false;
     let mut args = std::env::args().skip(1);
@@ -163,27 +162,63 @@ fn parse_args() -> Result<Args, String> {
         match arg.as_str() {
             "--config" => {
                 let value = args.next().ok_or("--config requires a path")?;
-                config = PathBuf::from(value);
+                config = Some(PathBuf::from(value));
             }
             "--check-config" => check_config = true,
             "--help" | "-h" => help = true,
             other if other.starts_with("--config=") => {
-                config = PathBuf::from(&other["--config=".len()..]);
+                config = Some(PathBuf::from(&other["--config=".len()..]));
             }
             other => return Err(format!("unknown argument {other}")),
         }
     }
 
     Ok(Args {
-        config,
+        config: config.unwrap_or_else(default_config_path),
         check_config,
         help,
     })
 }
 
+/// Default search order when neither --config nor ALPS_CONFIG is set:
+/// $HOME/.coinfig/alps/alps.toml, $HOME/.alps.toml, then the binary directory.
+fn default_config_path() -> PathBuf {
+    default_config_path_from(home_dir().as_deref(), &binary_dir())
+}
+
+fn default_config_path_from(home: Option<&Path>, binary_dir: &Path) -> PathBuf {
+    if let Some(home) = home {
+        for relative in [".coinfig/alps/alps.toml", ".alps.toml"] {
+            let candidate = home.join(relative);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    binary_dir.join("alps.toml")
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        })
+}
+
+fn binary_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 fn print_usage() {
     println!(
-        "alps {}\n\nUSAGE:\n    alps [OPTIONS]\n\nOPTIONS:\n    --config <PATH>     Configuration file (default: ALPS_CONFIG or alps.toml)\n    --check-config      Validate configuration and exit\n    -h, --help          Print this help",
+        "alps {}\n\nUSAGE:\n    alps [OPTIONS]\n\nOPTIONS:\n    --config <PATH>     Configuration file (default: ALPS_CONFIG,\n                        $HOME/.coinfig/alps/alps.toml, $HOME/.alps.toml,\n                        or <exe dir>/alps.toml)\n    --check-config      Validate configuration and exit\n    -h, --help          Print this help",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -248,5 +283,78 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("alps-config-paths-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_config(path: &Path) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, "").unwrap();
+    }
+
+    #[test]
+    fn coinfig_path_wins_when_present() {
+        let root = scratch("coinfig");
+        let home = root.join("home");
+        let binary = root.join("bin");
+        std::fs::create_dir_all(&binary).unwrap();
+        let coinfig = home.join(".coinfig/alps/alps.toml");
+        write_config(&coinfig);
+        write_config(&home.join(".alps.toml"));
+        write_config(&binary.join("alps.toml"));
+
+        assert_eq!(default_config_path_from(Some(&home), &binary), coinfig);
+    }
+
+    #[test]
+    fn home_dotfile_is_used_when_coinfig_is_absent() {
+        let root = scratch("dotfile");
+        let home = root.join("home");
+        let binary = root.join("bin");
+        std::fs::create_dir_all(&binary).unwrap();
+        let dotfile = home.join(".alps.toml");
+        write_config(&dotfile);
+        write_config(&binary.join("alps.toml"));
+
+        assert_eq!(default_config_path_from(Some(&home), &binary), dotfile);
+    }
+
+    #[test]
+    fn binary_directory_is_the_fallback() {
+        let root = scratch("binary");
+        let home = root.join("home");
+        let binary = root.join("bin");
+        std::fs::create_dir_all(&binary).unwrap();
+        let fallback = binary.join("alps.toml");
+        write_config(&fallback);
+
+        assert_eq!(default_config_path_from(Some(&home), &binary), fallback);
+        assert_eq!(default_config_path_from(None, &binary), fallback);
+    }
+
+    #[test]
+    fn missing_config_returns_the_binary_path_for_the_error() {
+        let root = scratch("missing");
+        let home = root.join("home");
+        let binary = root.join("bin");
+        std::fs::create_dir_all(&binary).unwrap();
+
+        assert_eq!(
+            default_config_path_from(Some(&home), &binary),
+            binary.join("alps.toml")
+        );
     }
 }
