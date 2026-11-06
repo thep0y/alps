@@ -150,7 +150,6 @@ jobs:
       cancel-in-progress: false
     if: >
       always() && !cancelled() &&
-      contains(github.event.pull_request.labels.*.name, 'automerge') &&
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (
@@ -180,6 +179,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          labels="$(gh pr view "${PR_URL}" --json labels --jq '.labels[].name')"
+          if ! grep -Fxq 'automerge' <<<"${labels}"; then
+            echo "PR does not have the automerge label"
+            exit 0
+          fi
+
           payload="$(gh pr view "${PR_URL}" --json state,headRefOid,statusCheckRollup)"
           state="$(jq -r '.state' <<<"${payload}")"
           head_sha="$(jq -r '.headRefOid' <<<"${payload}")"
@@ -199,11 +204,20 @@ jobs:
             [(.statusCheckRollup // [])[] | {name:(.name // .context), status, conclusion, state}] as $checks |
             $required | map(
               . as $name |
-              ($checks | map(select(.name == $name)) | first) as $check |
-              if $check == null then "MISSING"
-              elif (($check.conclusion // $check.state // $check.status) == "SUCCESS") then "SUCCESS"
-              elif (($check.conclusion // $check.state // $check.status) | IN("FAILURE","CANCELLED","TIMED_OUT","ACTION_REQUIRED","STARTUP_FAILURE","SKIPPED")) then "FAILURE"
-              else "PENDING" end
+              ($checks | map(select(.name == $name))) as $matches |
+              if ($matches | length) == 0 then "MISSING"
+              else
+                ($matches | map(
+                  if (.conclusion // .state // .status) == "SUCCESS" then "SUCCESS"
+                  elif ((.conclusion // .state // .status) | IN("FAILURE","CANCELLED","TIMED_OUT","ACTION_REQUIRED","STARTUP_FAILURE")) then "FAILURE"
+                  elif ((.conclusion // .state // .status) | IN("SKIPPED","NEUTRAL")) then "SKIPPED"
+                  else "PENDING" end
+                )) as $states |
+                if ($states | index("FAILURE")) != null then "FAILURE"
+                elif ($states | index("PENDING")) != null then "PENDING"
+                elif ($states | index("SUCCESS")) != null then "SUCCESS"
+                else "PENDING" end
+              end
             ) | join(" ")
           ' <<<"${payload}")"
           echo "checks: ${statuses}"
