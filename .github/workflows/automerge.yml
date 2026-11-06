@@ -38,14 +38,14 @@ jobs:
           fi
 
           for _ in $(seq 1 120); do
-            state="$(gh pr view "${PR_URL}" --json state,merged --jq '(.state + ":" + (.merged | tostring))')"
+            state="$(gh pr view "${PR_URL}" --json state --jq '.state')"
             case "${state}" in
-              MERGED:true)
+              MERGED)
                 gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/labels/automerge" >/dev/null 2>&1 || true
                 echo "merged; removed automerge label"
                 exit 0
                 ;;
-              CLOSED:false)
+              CLOSED)
                 echo "closed without merge; keeping the label"
                 exit 0
                 ;;
