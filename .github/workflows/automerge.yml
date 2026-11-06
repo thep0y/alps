@@ -21,8 +21,9 @@ jobs:
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - name: Enable native auto-merge
+      - name: Enable native auto-merge and wait for the merge
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -35,6 +36,23 @@ jobs:
           else
             gh pr merge --auto --squash "${PR_URL}"
           fi
+
+          for _ in $(seq 1 120); do
+            state="$(gh pr view "${PR_URL}" --json state,merged --jq '(.state + ":" + (.merged | tostring))')"
+            case "${state}" in
+              MERGED:true)
+                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/labels/automerge" >/dev/null 2>&1 || true
+                echo "merged; removed automerge label"
+                exit 0
+                ;;
+              CLOSED:false)
+                echo "closed without merge; keeping the label"
+                exit 0
+                ;;
+            esac
+            sleep 15
+          done
+          echo "timed out waiting for merge; the closed-event cleanup remains as fallback"
 
   remove-label:
     if: >
