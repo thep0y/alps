@@ -93,7 +93,11 @@ impl EgressLimiter {
                 let missing = bytes as f64 - bucket.tokens;
                 Duration::from_secs_f64(missing / self.rate)
             };
-            tokio::time::sleep(wait.max(Duration::from_millis(1))).await;
+            if wait.is_zero() {
+                tokio::task::yield_now().await;
+            } else {
+                tokio::time::sleep(wait).await;
+            }
         }
     }
 }
@@ -448,6 +452,21 @@ mod tests {
         limiter.acquire(64 * 1024).await;
         assert!(
             start.elapsed() >= Duration::from_millis(900),
+            "elapsed {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn high_egress_rate_is_not_capped_by_a_millisecond_floor() {
+        let limiter = EgressLimiter::new(100 * 1024 * 1024);
+        limiter.acquire(100 * 1024 * 1024).await;
+        let start = AsyncInstant::now();
+        for _ in 0..100 {
+            limiter.acquire(8 * 1024).await;
+        }
+        assert!(
+            start.elapsed() < Duration::from_millis(50),
             "elapsed {:?}",
             start.elapsed()
         );
