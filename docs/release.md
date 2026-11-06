@@ -13,6 +13,7 @@ The cache keys are:
 - **release cache**: `shared-key: release`, warmed by `cargo build --release --locked`.
 - **MSRV cache**: `shared-key: msrv`.
 - **cross cache**: `shared-key: cross-release`.
+- **Docker cache**: BuildKit GHA scope `alps-docker`, warmed by the `docker` job in `warm-cache`.
 
 `warm-cache` saves only for `main`:
 
@@ -24,7 +25,7 @@ Pull requests and feature branches restore the main caches but never overwrite t
 
 Keeping `push` and `pull_request` in separate workflows is intentional: a feature-branch push followed by a pull-request synchronization would otherwise run every validation job twice.
 
-The Docker build uses a separate GitHub Actions cache scope (`alps-docker`).
+The Docker cache uses a separate GitHub Actions scope (`alps-docker`). Only the `warm-cache` Docker job writes it; `docker.yml` on pull requests restores it without `cache-to`, so no PR-scoped caches are created.
 
 > Forks do not receive the base repository's Actions caches by design; their first run must download dependencies.
 
