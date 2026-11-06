@@ -151,8 +151,7 @@ pub fn error_response(error: &ProxyError, request_id: &str, is_head: bool) -> Re
     let mut builder = Response::builder()
         .status(error.status())
         .header(header::CONTENT_TYPE, "application/json")
-        .header(header::CACHE_CONTROL, "no-store")
-        .header("x-content-type-options", "nosniff");
+        .header(header::CACHE_CONTROL, "no-store");
 
     if let StatusCode::UNAUTHORIZED = error.status() {
         builder = builder.header(header::WWW_AUTHENTICATE, "Bearer realm=\"alps\"");
