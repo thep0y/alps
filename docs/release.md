@@ -29,11 +29,14 @@ The Docker cache uses a separate GitHub Actions scope (`alps-docker`). Only the 
 
 > Forks do not receive the base repository's Actions caches by design; their first run must download dependencies.
 
-### Repository merge settings
+### PR labels and auto-merge
 
-The repository enables native auto-merge and automatic deletion of merged head branches. No workflow implements or triggers either behavior, and no workflow listens for label changes.
+- `pr-type-label.yml` applies exactly one `type:*` label from the head branch prefix (`feat/`, `fix/`, `docs/`, ...), falling back to the PR title's Conventional Commits prefix. It removes conflicting `type:*` labels. It does not listen for `labeled` events, so label edits do not rerun validation.
+- `automerge.yml` enables native GitHub auto-merge when the `automerge` label is added (or when a labeled draft becomes ready for review), and removes the label after a successful merge.
+- The repository's auto-merge capability and automatic head-branch deletion remain enabled.
+- Label events do not trigger the split validation workflows. The `automerge` workflow does receive `labeled` events (GitHub cannot filter by label name in the trigger); jobs for other labels are skipped.
 
-Branch protection still applies to native auto-merge. Enable auto-merge per pull request through GitHub when desired; the `automerge` label is not a workflow trigger.
+Branch protection and required reviews still apply to native auto-merge.
 
 ## 2. Release workflow
 
