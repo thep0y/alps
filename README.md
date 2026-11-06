@@ -149,7 +149,7 @@ Local load testing: `cargo run --features test-util --example dev_proxy` starts 
 - `dry_run` performs the bump, validation and builds without committing or publishing.
 - Branch protection may require a `RELEASE_TOKEN` secret (contents: write) or an explicit Actions bypass for the version-bump commit.
 - PR validation is split into independent workflows: `lint`, `test`, `release-build`, `msrv`, `cross`, `audit` and `docker`. Require the relevant checks in branch protection.
-- PR type labels are applied automatically from the head branch prefix or Conventional Commits title; conflicting `type:*` labels are removed. Adding the `automerge` label enables native GitHub auto-merge, and the label is removed after a successful merge. Label edits do not rerun validation workflows; the repository deletes merged head branches.
+- PR type labels are applied automatically from the head branch prefix or Conventional Commits title; conflicting `type:*` labels are removed. Adding the `automerge` label waits for the lint/test/release-build/msrv/cross/audit/docker checks, then enables native GitHub auto-merge, and removes the label after a successful merge. Label edits do not rerun validation workflows; the repository deletes merged head branches.
 
 See [docs/release.md](docs/release.md) for cache keys, bump semantics, required permissions and recovery steps.
 
