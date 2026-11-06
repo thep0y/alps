@@ -32,7 +32,7 @@ The Docker cache uses a separate GitHub Actions scope (`alps-docker`). Only the 
 ### PR labels and auto-merge
 
 - `pr-type-label.yml` applies exactly one `type:*` label from the head branch prefix (`feat/`, `fix/`, `docs/`, ...), falling back to the PR title's Conventional Commits prefix. It removes conflicting `type:*` labels. It does not listen for `labeled` events, so label edits do not rerun validation.
-- `automerge.yml` enables native GitHub auto-merge when the `automerge` label is added (or when a labeled draft becomes ready for review), and removes the label after a successful merge.
+- `automerge.yml` disables any pre-existing auto-merge, waits for the seven validation checks (`lint`, `test`, `release-build`, `msrv`, `cross`, `audit`, `docker`), then enables native GitHub auto-merge pinned to the checked head SHA. It removes the label after a successful merge and does not merge if a validation check fails.
 - The repository's auto-merge capability and automatic head-branch deletion remain enabled.
 - Label events do not trigger the split validation workflows. The `automerge` workflow does receive `labeled` events (GitHub cannot filter by label name in the trigger); jobs for other labels are skipped.
 
