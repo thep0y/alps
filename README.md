@@ -52,9 +52,13 @@ curl -H "Authorization: Bearer $ALPS_API_TOKEN" \
 curl -H "Authorization: Bearer $ALPS_API_TOKEN" -H "Range: bytes=0-1023" \
   -o part.bin \
   "http://127.0.0.1:8080/v1/proxy?url=https%3A%2F%2Ffiles.example.org%2Fapp.tar.gz"
+
+# Scheme omitted: ALPS prepends https://
+curl -H "Authorization: Bearer $ALPS_API_TOKEN" \
+  "http://127.0.0.1:8080/v1/proxy?url=files.example.org%2Fapp.tar.gz"
 ```
 
-> The `url` parameter must be percent-encoded. ALPS does not treat `+` as a space and does not reorder query parameters.
+> The `url` parameter must be percent-encoded. ALPS does not treat `+` as a space and does not reorder query parameters. If the value has no scheme, `https://` is prepended; `//host/path` becomes `https://host/path`. An explicit `http://` is still subject to `proxy.allow_http`.
 
 ## API
 

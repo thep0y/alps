@@ -64,7 +64,7 @@ Dependency direction: `http -> {policy, upstream, limits, auth, telemetry}`; `up
 4. Bearer authentication; skipped when `auth.mode=none`.
 5. Reject GET/HEAD with a body (400).
 6. Parse the `url` parameter (percent-decode, no form `+` conversion), check length/control characters.
-7. `UrlPolicy::validate`: scheme, port, userinfo, fragment, IP literals, allowlist.
+7. `UrlPolicy::validate`: normalize a missing scheme to HTTPS, then check scheme, port, userinfo, fragment, IP literals and allowlist.
 8. Global RPS -> global concurrency permit.
 9. RedirectController: pre-resolve -> send (header timeout) -> validate/loop/hop per 3xx -> final response.
 10. Final response: status + header filtering + Content-Disposition.
