@@ -1,0 +1,47 @@
+name: pr-type-label
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-type-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply one type label from branch or title
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          target="$(python3 scripts/pr_type_label.py --branch "${HEAD_REF}" --title "${TITLE}")"
+          if [[ -z "${target}" ]]; then
+            echo "no type mapping for branch/title"
+            exit 0
+          fi
+
+          current="$(gh pr view "${NUMBER}" --repo "${REPO}" --json labels --jq '.labels[].name')"
+          while IFS= read -r label; do
+            [[ "${label}" == type:* ]] || continue
+            [[ "${label}" == "${target}" ]] && continue
+            encoded="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${label}")"
+            gh api --method DELETE "repos/${REPO}/issues/${NUMBER}/labels/${encoded}" >/dev/null 2>&1 || true
+          done <<< "${current}"
+
+          gh api --method POST "repos/${REPO}/issues/${NUMBER}/labels" -f "labels[]=${target}" >/dev/null
+          echo "applied ${target}"
