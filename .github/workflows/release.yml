@@ -33,8 +33,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      prerelease: ${{ steps.bump.outputs.prerelease }}
+      sha: ${{ steps.bump.outputs.sha }}
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -48,15 +53,12 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # Restore the same release cache that main's CI warmed. The version bump
-      # changes Cargo.lock, so the restore-key prefix still matters.
-      - name: Restore release cache
+      - name: Restore debug cache
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: alps-v1
-          shared-key: release
-          cache-on-failure: true
-          save-if: true
+          shared-key: debug
+          save-if: false
 
       - name: Compute next version
         id: bump
@@ -75,6 +77,7 @@ jobs:
           fi
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
           if [[ "${{ inputs.kind }}" == "stable" ]]; then
             echo "prerelease=false" >> "${GITHUB_OUTPUT}"
           else
@@ -89,44 +92,165 @@ jobs:
           cargo check --locked --all-features
           cargo test --all-features
 
-      - name: Install cross
-        uses: taiki-e/install-action@cross
+  build-x86_64:
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore release cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: release
+          save-if: false
+
+      - name: Apply the release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(python3 scripts/bump_version.py \
+            --bump "${{ inputs.bump }}" \
+            --kind "${{ inputs.kind }}" \
+            --write)"
+          test "${actual}" = "${VERSION}"
+          echo "building ${TAG} on x86_64"
 
       - name: Build x86_64
         run: cargo build --release --locked
 
-      - name: Build aarch64
-        run: cross build --release --locked --target aarch64-unknown-linux-gnu
-
-      - name: Package artifacts
+      - name: Package x86_64
         shell: bash
-        env:
-          TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p dist
           tar -czf "dist/alps-${TAG}-x86_64-unknown-linux-gnu.tar.gz" \
             -C target/release alps
+
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alps-x86_64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-aarch64:
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+
+      - name: Restore cross cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: cross-release
+          save-if: false
+
+      - name: Apply the release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(python3 scripts/bump_version.py \
+            --bump "${{ inputs.bump }}" \
+            --kind "${{ inputs.kind }}" \
+            --write)"
+          test "${actual}" = "${VERSION}"
+          echo "building ${TAG} on aarch64"
+
+      - name: Build aarch64
+        run: cross build --release --locked --target aarch64-unknown-linux-gnu
+
+      - name: Package aarch64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
           tar -czf "dist/alps-${TAG}-aarch64-unknown-linux-gnu.tar.gz" \
             -C target/aarch64-unknown-linux-gnu/release alps
+
+      - name: Upload aarch64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alps-aarch64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build-x86_64, build-aarch64]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: alps-*
+          path: dist
+          merge-multiple: true
+
+      - name: Package checksums
+        shell: bash
+        run: |
+          set -euo pipefail
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
           ls -l dist
+
+      - name: Apply the release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(python3 scripts/bump_version.py \
+            --bump "${{ inputs.bump }}" \
+            --kind "${{ inputs.kind }}" \
+            --write)"
+          test "${actual}" = "${VERSION}"
 
       - name: Generate categorized release notes
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
+          git fetch --tags --force origin
           python3 scripts/release_notes.py --tag "${TAG}" > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
       - name: Commit version bump to main
         if: ${{ !inputs.dry_run }}
         shell: bash
-        env:
-          TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -144,8 +268,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.bump.outputs.tag }}
-          PRERELEASE: ${{ steps.bump.outputs.prerelease }}
         run: |
           set -euo pipefail
           git tag -a "${TAG}" -m "ALPS ${TAG}"
@@ -158,6 +280,4 @@ jobs:
 
       - name: Dry run summary
         if: ${{ inputs.dry_run }}
-        env:
-          TAG: ${{ steps.bump.outputs.tag }}
         run: echo "Dry run complete for ${TAG}; no commit, tag or release was created."
