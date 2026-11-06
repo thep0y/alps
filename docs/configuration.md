@@ -89,7 +89,7 @@ Omitted sections use the defaults listed below. `serde(deny_unknown_fields)` is 
 |---|---|---|---|
 | `allow_http` | boolean | `false` | Required for any `http` scheme in an allowlist rule. |
 | `max_redirects` | integer | `5` | 0-10. 0 disables following; a 3xx response becomes `upstream_redirect_error`. |
-| `max_url_length` | integer | `8192` | 128-65536. Maximum decoded target URL length in bytes. |
+| `max_url_length` | integer | `8192` | 128-65536. Maximum decoded target URL length in bytes, checked again after a missing `https://` scheme is added. |
 | `connect_timeout_secs` | integer | `5` | 1-300. DNS resolution plus TCP connect. |
 | `response_header_timeout_secs` | integer | `15` | 1-300. Time allowed for upstream response headers. |
 | `read_idle_timeout_secs` | integer | `30` | 1-300. Per-read upstream body idle timeout; resets after each read. |
