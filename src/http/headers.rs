@@ -116,12 +116,45 @@ pub fn filter_response(upstream: &HeaderMap, status: StatusCode) -> HeaderMap {
         HeaderValue::from_static("sandbox"),
     );
     if !out.contains_key(header::CONTENT_DISPOSITION) {
+        let disposition = if is_safe_inline_type(&out) {
+            "inline"
+        } else {
+            "attachment"
+        };
         out.insert(
             header::CONTENT_DISPOSITION,
-            HeaderValue::from_static("attachment"),
+            HeaderValue::from_static(disposition),
         );
     }
     out
+}
+
+/// Text-like types that browsers can safely render as text. Active content
+/// (HTML, SVG, XML, JavaScript, PDF, etc.) must stay an attachment.
+fn is_safe_inline_type(headers: &HeaderMap) -> bool {
+    let Some(value) = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    let mime = value
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        mime.as_str(),
+        "text/plain"
+            | "text/csv"
+            | "text/markdown"
+            | "text/yaml"
+            | "application/json"
+            | "application/yaml"
+            | "application/x-yaml"
+            | "application/x-ns-proxy-autoconfig"
+    )
 }
 
 fn connection_tokens(headers: &HeaderMap) -> HashSet<HeaderName> {
@@ -256,6 +289,62 @@ mod tests {
         let filtered = filter_response(&upstream, StatusCode::NOT_MODIFIED);
         assert!(!filtered.contains_key(header::CONTENT_LENGTH));
         assert!(!filtered.contains_key(header::CONTENT_RANGE));
+    }
+
+    #[test]
+    fn safe_text_types_are_inline_but_active_content_is_attachment() {
+        for content_type in [
+            "text/plain",
+            "text/plain; charset=utf-8",
+            "text/csv",
+            "application/json",
+            "application/x-ns-proxy-autoconfig",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, content_type.parse().unwrap());
+            let filtered = filter_response(&headers, StatusCode::OK);
+            assert_eq!(
+                filtered[header::CONTENT_DISPOSITION],
+                "inline",
+                "content-type {content_type}"
+            );
+        }
+
+        for content_type in [
+            "text/html",
+            "application/xhtml+xml",
+            "image/svg+xml",
+            "application/xml",
+            "text/javascript",
+            "application/pdf",
+            "application/octet-stream",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, content_type.parse().unwrap());
+            let filtered = filter_response(&headers, StatusCode::OK);
+            assert_eq!(
+                filtered[header::CONTENT_DISPOSITION],
+                "attachment",
+                "content-type {content_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_attachment_overrides_safe_inline_type() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, "text/plain".parse().unwrap());
+        headers.insert(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=\"notes.txt\"".parse().unwrap(),
+        );
+        let filtered = filter_response(&headers, StatusCode::OK);
+        assert!(
+            filtered[header::CONTENT_DISPOSITION]
+                .to_str()
+                .unwrap()
+                .starts_with("attachment")
+        );
     }
 
     #[test]

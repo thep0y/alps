@@ -102,8 +102,10 @@ trusted_proxies = []
 block_non_global_ips = true
 block_ip_literal_hosts = true
 no_system_proxy = true
-# Only "attachment" is accepted in this release. Upstream Content-Disposition
-# is sanitized; unsafe values fall back to this disposition.
+# Only "attachment" is accepted in this release. A valid upstream attachment
+# is preserved. Safe text types (plain text, CSV, Markdown, JSON, YAML, PAC)
+# are served inline so browsers can display them; active content such as HTML,
+# SVG, XML, JavaScript and PDF always falls back to attachment.
 default_content_disposition = "attachment"
 # Explicitly declare that the entire listener is reachable only by trusted
 # clients. Required for auth.mode = "none" on a non-loopback listener; it does
