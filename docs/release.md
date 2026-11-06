@@ -5,7 +5,7 @@
 Cache warming is a separate workflow from pull-request validation:
 
 - [`.github/workflows/warm-cache.yml`](../.github/workflows/warm-cache.yml) runs on pushes to `main` and is the only cache writer.
-- [`.github/workflows/lint.yml`](../.github/workflows/lint.yml), [`test.yml`](../.github/workflows/test.yml), [`release-build.yml`](../.github/workflows/release-build.yml), [`msrv.yml`](../.github/workflows/msrv.yml), [`cross.yml`](../.github/workflows/cross.yml), [`audit.yml`](../.github/workflows/audit.yml) and [`docker.yml`](../.github/workflows/docker.yml) run independently on pull requests and restore caches read-only (`save-if: false`).
+- [`.github/workflows/pr.yml`](../.github/workflows/pr.yml) runs the lint, test, release-build, MSRV, cross, audit and Docker jobs on pull requests and restores caches read-only (`save-if: false`).
 
 The cache keys are:
 
@@ -25,18 +25,18 @@ Pull requests and feature branches restore the main caches but never overwrite t
 
 Keeping `push` and `pull_request` in separate workflows is intentional: a feature-branch push followed by a pull-request synchronization would otherwise run every validation job twice.
 
-The Docker cache uses a separate GitHub Actions scope (`alps-docker`). Only the `warm-cache` Docker job writes it; `docker.yml` on pull requests restores it without `cache-to`, so no PR-scoped caches are created.
+The Docker cache uses a separate GitHub Actions scope (`alps-docker`). Only the `warm-cache` Docker job writes it; the Docker job in `pr.yml` restores it without `cache-to`, so no PR-scoped caches are created.
 
 > Forks do not receive the base repository's Actions caches by design; their first run must download dependencies.
 
-### PR labels and auto-merge
+### PR labels and merge
 
-- `pr-type-label.yml` applies exactly one `type:*` label from the head branch prefix (`feat/`, `fix/`, `docs/`, ...), falling back to the PR title's Conventional Commits prefix. It removes conflicting `type:*` labels. It does not listen for `labeled` events, so label edits do not rerun validation.
-- `automerge.yml` disables any pre-existing auto-merge, waits for the seven validation checks (`lint`, `test`, `release-build`, `msrv`, `cross`, `audit`, `docker`), then enables native GitHub auto-merge pinned to the checked head SHA. It removes the label after a successful merge and does not merge if a validation check fails.
-- The repository's auto-merge capability and automatic head-branch deletion remain enabled.
-- Label events do not trigger the split validation workflows. The `automerge` workflow does receive `labeled` events (GitHub cannot filter by label name in the trigger); jobs for other labels are skipped.
+- The `type-label` job in `pr.yml` applies exactly one `type:*` label from the head branch prefix (`feat/`, `fix/`, `docs/`, ...), falling back to the PR title's Conventional Commits prefix. It removes conflicting `type:*` labels.
+- The final `automerge` job runs only when the PR has the `automerge` label. On a normal code event it runs after all seven validation jobs and merges the checked head with a squash merge. On a label-only event the validation jobs are skipped; the job merges immediately only if the current checks are already successful, otherwise it exits and the running code workflow performs the merge when checks finish.
+- The `automerge` job removes the label after the merge. The repository's automatic head-branch deletion remains enabled.
+- Label changes do not rerun validation jobs. Since `labeled` must be in the workflow trigger, a label-only run still appears, but every validation job is skipped and the automerge job only does work for the `automerge` label.
 
-Branch protection and required reviews still apply to native auto-merge.
+No separate polling job is used.
 
 ## 2. Release workflow
 
