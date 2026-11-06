@@ -16,7 +16,7 @@ Out of scope for P0: arbitrary HTTP methods, CONNECT, WebSocket, uploads; upstre
 ## 2. Security invariants (cannot be disabled)
 
 1. An empty allowlist denies everything.
-2. Only absolute http(s) URLs are accepted; HTTPS only by default.
+2. http(s) URLs are accepted; a URL without a scheme is normalized to `https://`, and HTTPS is the default. Explicit `http://` still requires `proxy.allow_http`.
 3. userinfo, fragments, control characters and oversized URLs are rejected.
 4. IP-literal targets are rejected (IPv4/IPv6/bracketed forms).
 5. Every hop revalidates scheme/host/port and reapplies DNS/IP filtering.

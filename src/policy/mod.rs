@@ -3,6 +3,8 @@
 pub mod allowlist;
 pub mod ip_policy;
 
+use std::borrow::Cow;
+
 use thiserror::Error;
 use url::{Host, Url};
 
@@ -134,7 +136,11 @@ impl UrlPolicy {
         if raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
             return Err(PolicyError::InvalidCharacters);
         }
-        let url = Url::parse(raw).map_err(|_| PolicyError::InvalidUrl)?;
+        let normalized = with_default_scheme(raw);
+        if normalized.len() > self.max_url_length {
+            return Err(PolicyError::TooLong);
+        }
+        let url = Url::parse(normalized.as_ref()).map_err(|_| PolicyError::InvalidUrl)?;
         self.validate_parsed(url)
     }
 
@@ -184,6 +190,30 @@ impl UrlPolicy {
     }
 }
 
+/// Add the default HTTPS scheme when callers pass a bare host or a
+/// protocol-relative URL. Explicit schemes are preserved and validated later.
+fn with_default_scheme(raw: &str) -> Cow<'_, str> {
+    if raw.starts_with("//") {
+        Cow::Owned(format!("https:{raw}"))
+    } else if has_explicit_scheme(raw) {
+        Cow::Borrowed(raw)
+    } else {
+        Cow::Owned(format!("https://{raw}"))
+    }
+}
+
+fn has_explicit_scheme(raw: &str) -> bool {
+    let Some((scheme, _)) = raw.split_once("://") else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphabetic()
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +254,52 @@ mod tests {
         assert_eq!(target.host(), "files.example.org");
         assert_eq!(target.port(), 443);
         assert_eq!(target.scheme(), Scheme::Https);
+    }
+
+    #[test]
+    fn defaults_bare_urls_to_https() {
+        let target = policy()
+            .validate("files.example.org/releases/app.tar.gz")
+            .unwrap();
+        assert_eq!(target.scheme(), Scheme::Https);
+        assert_eq!(target.port(), 443);
+        assert_eq!(
+            target.url().as_str(),
+            "https://files.example.org/releases/app.tar.gz"
+        );
+
+        let target = policy().validate("//files.example.org/x").unwrap();
+        assert_eq!(target.scheme(), Scheme::Https);
+        assert_eq!(target.url().as_str(), "https://files.example.org/x");
+    }
+
+    #[test]
+    fn default_scheme_ignores_double_slashes_in_the_query() {
+        let target = policy()
+            .validate("files.example.org/file?next=https://evil.example/x")
+            .unwrap();
+        assert_eq!(target.host(), "files.example.org");
+        assert_eq!(target.url().query(), Some("next=https://evil.example/x"));
+    }
+
+    #[test]
+    fn bare_host_port_uses_https_port_rule() {
+        let mut custom = rule("files.example.org", false);
+        custom.ports = vec![8443];
+        let policy = UrlPolicy::from_config(&config_with(vec![custom], false));
+        let target = policy.validate("files.example.org:8443/x").unwrap();
+        assert_eq!(target.scheme(), Scheme::Https);
+        assert_eq!(target.port(), 8443);
+    }
+
+    #[test]
+    fn explicit_http_scheme_is_preserved() {
+        let mut custom = rule("files.example.org", false);
+        custom.schemes = vec!["http".into()];
+        custom.ports = vec![80];
+        let policy = UrlPolicy::from_config(&config_with(vec![custom], true));
+        let target = policy.validate("http://files.example.org/x").unwrap();
+        assert_eq!(target.scheme(), Scheme::Http);
     }
 
     #[test]
@@ -305,6 +381,14 @@ mod tests {
         let policy = UrlPolicy::from_config(&config);
         let url = format!("https://files.example.org/{}", "a".repeat(200));
         assert_eq!(policy.validate(&url), Err(PolicyError::TooLong));
+
+        let mut short = config_with(vec![rule("files.example.org", false)], false);
+        short.proxy.max_url_length = 20;
+        let short = UrlPolicy::from_config(&short);
+        assert_eq!(
+            short.validate("files.example.org/x"),
+            Err(PolicyError::TooLong)
+        );
     }
 
     #[test]
