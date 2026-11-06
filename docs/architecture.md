@@ -124,7 +124,7 @@ Upstream business statuses (200/206/304/404/416, etc.) are passed through unchan
 
 Requests forward only `Range`, `If-Range`, `If-None-Match`, `If-Modified-Since` (optionally `Accept`), and force `Accept-Encoding: identity`; Host/Cookie/Authorization/Proxy-*/X-Forwarded-* are not forwarded.
 
-Responses pass through only Content-Type/Length/Range/Accept-Ranges/ETag/Last-Modified/Cache-Control/Expires/Content-Disposition/Content-Encoding; Set-Cookie/Location/Transfer-Encoding/Connection and their extension fields are stripped; security headers are enforced. 204/304 carry no Content-Length.
+Responses pass through only Content-Type/Length/Range/Accept-Ranges/ETag/Last-Modified/Cache-Control/Expires/Content-Disposition/Content-Encoding; Set-Cookie/Location/Transfer-Encoding/Connection and their extension fields are stripped; security headers are enforced. 204/304 carry no Content-Length. Safe text types are served `inline`; active content and unknown types use `attachment`.
 
 ## 9. Design vs. implementation differences
 

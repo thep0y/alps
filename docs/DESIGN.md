@@ -67,7 +67,7 @@ Preserve upstream response headers: `Content-Type`, `Content-Length`, `Content-R
 
 Preserve file-serving upstream statuses: `200`, `206`, `304`, `404`, `416`, etc. Internal proxy errors return ALPS-owned status/error codes.
 
-Set `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Content-Security-Policy: sandbox` by default; untrusted files default to `Content-Disposition: attachment`. Browser-embedded images/video require a separate trusted origin, strict types and explicit configuration.
+Set `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Content-Security-Policy: sandbox` by default; active content and unknown types default to `Content-Disposition: attachment`. Safe text types (`text/plain`, CSV, Markdown, JSON, YAML, PAC) may be served `inline` so browsers can display them. Browser-embedded images/video require a separate trusted origin, strict types and explicit configuration.
 
 CORS is closed by default; enable it only for trusted origins.
 

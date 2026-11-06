@@ -117,7 +117,7 @@ Omitted sections use the defaults listed below. `serde(deny_unknown_fields)` is 
 | `block_non_global_ips` | boolean | `true` | Fixed to true; false is a startup error. |
 | `block_ip_literal_hosts` | boolean | `true` | Fixed to true; false is a startup error. |
 | `no_system_proxy` | boolean | `true` | Fixed to true; false is a startup error. |
-| `default_content_disposition` | string | `attachment` | Only `attachment` is accepted in this release. |
+| `default_content_disposition` | string | `attachment` | Only `attachment` is accepted. Safe text types may still be served `inline`; active content always falls back to this value. |
 | `trusted_network_only` | boolean | `false` | Explicit trust declaration. Required for `auth.mode = "none"` on a non-loopback listener; it does not relax allowlist, DNS or IP checks. |
 
 These are defense-in-depth invariants, not tuning knobs. Keep them enabled.
