@@ -1,4 +1,4 @@
-//! Request and response header filtering, including security headers.
+//! Request and response header filtering and content-disposition policy.
 
 use std::collections::HashSet;
 
@@ -103,18 +103,9 @@ pub fn filter_response(upstream: &HeaderMap, status: StatusCode) -> HeaderMap {
         }
     }
 
-    out.insert(
-        "x-content-type-options",
-        HeaderValue::from_static("nosniff"),
-    );
-    out.insert(
-        header::REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
-    );
-    out.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("sandbox"),
-    );
+    // Replace only the disposition needed to control browser rendering.
+    // Other response headers are either forwarded from the upstream allowlist
+    // or dropped; do not inject extra headers that the upstream did not send.
     if !out.contains_key(header::CONTENT_DISPOSITION) {
         let disposition = if is_safe_inline_type(&out) {
             "inline"
@@ -268,8 +259,8 @@ mod tests {
         assert!(!filtered.contains_key(header::TRANSFER_ENCODING));
         assert!(!filtered.contains_key("x-secret"));
         assert_eq!(filtered[header::CONTENT_DISPOSITION], "attachment");
-        assert_eq!(filtered["x-content-type-options"], "nosniff");
-        assert_eq!(filtered[header::CONTENT_SECURITY_POLICY], "sandbox");
+        assert!(!filtered.contains_key("x-content-type-options"));
+        assert!(!filtered.contains_key(header::CONTENT_SECURITY_POLICY));
     }
 
     #[test]

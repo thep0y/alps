@@ -41,7 +41,7 @@ axum Body::from_stream -> hyper HTTP/1 -> client
 | `src/server.rs` | TCP accept loop, HTTP/1 header limits, connection cap, graceful shutdown |
 | `src/http/routes.rs` | Routing, request orchestration, response construction, 304/204 header fixups |
 | `src/http/query.rs` | Raw query parsing; does not convert `+` to space |
-| `src/http/headers.rs` | Request/response header allowlists, hop-by-hop, security headers, Content-Disposition |
+| `src/http/headers.rs` | Request/response header allowlists, hop-by-hop filtering, Content-Disposition |
 | `src/http/errors.rs` | ProxyError, status/error codes, JSON error body |
 | `src/policy/mod.rs` | ValidatedTarget, scheme/host/port validation |
 | `src/policy/allowlist.rs` | Exact/subdomain label-boundary matching |
@@ -67,7 +67,7 @@ Dependency direction: `http -> {policy, upstream, limits, auth, telemetry}`; `up
 7. `UrlPolicy::validate`: scheme, port, userinfo, fragment, IP literals, allowlist.
 8. Global RPS -> global concurrency permit.
 9. RedirectController: pre-resolve -> send (header timeout) -> validate/loop/hop per 3xx -> final response.
-10. Final response: status + header filtering + security headers + Content-Disposition.
+10. Final response: status + header filtering + Content-Disposition.
 11. Known Content-Length over the limit: return 502 before writing headers.
 12. HEAD/204/304: empty body, release permits.
 13. Otherwise: `Body::from_stream(GuardedStream)`; permits live as long as the Body.
@@ -124,7 +124,7 @@ Upstream business statuses (200/206/304/404/416, etc.) are passed through unchan
 
 Requests forward only `Range`, `If-Range`, `If-None-Match`, `If-Modified-Since` (optionally `Accept`), and force `Accept-Encoding: identity`; Host/Cookie/Authorization/Proxy-*/X-Forwarded-* are not forwarded.
 
-Responses pass through only Content-Type/Length/Range/Accept-Ranges/ETag/Last-Modified/Cache-Control/Expires/Content-Disposition/Content-Encoding; Set-Cookie/Location/Transfer-Encoding/Connection and their extension fields are stripped; security headers are enforced. 204/304 carry no Content-Length. Safe text types are served `inline`; active content and unknown types use `attachment`.
+Responses pass through only Content-Type/Length/Range/Accept-Ranges/ETag/Last-Modified/Cache-Control/Expires/Content-Disposition/Content-Encoding; Set-Cookie/Location/Transfer-Encoding/Connection and their extension fields are stripped. No extra security headers are injected. 204/304 carry no Content-Length. Safe text types are served `inline`; active content and unknown types use `attachment`.
 
 ## 9. Design vs. implementation differences
 
