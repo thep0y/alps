@@ -24,5 +24,6 @@ jobs:
           file: deploy/Dockerfile
           push: false
           tags: alps:ci
+          # Pull requests only restore the main-branch cache; writing a
+          # PR-scoped cache creates entries that other branches cannot reuse.
           cache-from: type=gha,scope=alps-docker
-          cache-to: type=gha,mode=max,scope=alps-docker
