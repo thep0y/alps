@@ -5,7 +5,7 @@
 Cache warming is a separate workflow from pull-request validation:
 
 - [`.github/workflows/warm-cache.yml`](../.github/workflows/warm-cache.yml) runs on pushes to `main` and is the only cache writer.
-- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on `pull_request` only; it restores caches read-only (`save-if: false`).
+- [`.github/workflows/lint.yml`](../.github/workflows/lint.yml), [`test.yml`](../.github/workflows/test.yml), [`release-build.yml`](../.github/workflows/release-build.yml), [`msrv.yml`](../.github/workflows/msrv.yml), [`cross.yml`](../.github/workflows/cross.yml), [`audit.yml`](../.github/workflows/audit.yml) and [`docker.yml`](../.github/workflows/docker.yml) run independently on pull requests and restore caches read-only (`save-if: false`).
 
 The cache keys are:
 
@@ -28,29 +28,11 @@ The Docker build uses a separate GitHub Actions cache scope (`alps-docker`).
 
 > Forks do not receive the base repository's Actions caches by design; their first run must download dependencies.
 
-### Auto-merge
+### Repository merge settings
 
-The `automerge` label squash-merges a pull request after CI passes:
+The repository enables native auto-merge and automatic deletion of merged head branches. No workflow implements or triggers either behavior, and no workflow listens for label changes.
 
-- The PR must be non-draft and come from this repository (fork PRs are skipped).
-- The `automerge` job waits for `ci-success` and then runs `gh pr merge --squash --delete-branch`.
-- Branch protection and required reviews are still enforced by GitHub. If the PR is not currently mergeable, the job fails instead of queueing a deferred auto-merge.
-- The job runs on `labeled`, `opened`, `synchronize`, `reopened` and `ready_for_review` events, so adding the label after CI has passed triggers the merge.
-- Deleting the head branch in the merge call is intentional: the repository's automatic deletion setting is not applied to every API/auto-merge path, so the workflow performs it explicitly.
-
-### Branch cleanup
-
-The repository setting **Automatically delete head branches** is enabled. [`.github/workflows/cleanup-branches.yml`](../.github/workflows/cleanup-branches.yml) is a safety net:
-
-- On `pull_request: closed`, it deletes the head branch only when the PR was merged, comes from this repository, is not the default branch, and the branch still points at the merged head SHA.
-- `push` to `main` and `workflow_dispatch` run a sweep over merged PRs and delete branches that still exist, skipping the default branch, branches with an open PR, and branches that moved after their PR was merged. The push trigger also handles the merge of the PR that introduced this workflow, which cannot receive its own `closed` event from the old default-branch workflow.
-- The manual sweep supports `dry_run = true`.
-- An already-deleted branch is treated as success, so this does not conflict with GitHub's automatic deletion.
-
-```bash
-gh workflow run cleanup-branches.yml -f dry_run=true
-gh workflow run cleanup-branches.yml
-```
+Branch protection still applies to native auto-merge. Enable auto-merge per pull request through GitHub when desired; the `automerge` label is not a workflow trigger.
 
 ## 2. Release workflow
 
