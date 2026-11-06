@@ -28,10 +28,11 @@ async fn get_proxies_file_with_security_headers() {
         "application/octet-stream"
     );
     assert_eq!(response.headers()[header::CONTENT_LENGTH], "16");
-    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
-    assert_eq!(
-        response.headers()[header::CONTENT_SECURITY_POLICY],
-        "sandbox"
+    assert!(!response.headers().contains_key("x-content-type-options"));
+    assert!(
+        !response
+            .headers()
+            .contains_key(header::CONTENT_SECURITY_POLICY)
     );
     assert_eq!(
         response.headers()[header::CONTENT_DISPOSITION],

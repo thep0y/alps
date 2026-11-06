@@ -18,7 +18,7 @@ ALPS is not a general-purpose forward proxy and not a transparent reverse proxy:
 - Validation on every hop: ALPS owns the redirect chain and revalidates scheme, host, port and IP for each new URL, with loop detection and a hop limit.
 - DNS rebinding defense: a custom `reqwest` resolver only hands connector-approved IPs to the transport and system proxies are disabled.
 - File semantics: streaming body (no collect), backpressure, `Range` / `If-Range` / `If-None-Match` / `If-Modified-Since`, 206/304/416 passthrough.
-- Security response headers: `nosniff`, `no-referrer`, `CSP sandbox`; active content defaults to `attachment`, while safe text types (plain text, CSV, Markdown, JSON, YAML, PAC) are inline. `Set-Cookie`, `Location` and hop-by-hop headers are stripped.
+- Response policy: only file-semantics headers are forwarded; `Set-Cookie`, `Location` and hop-by-hop headers are stripped. `Content-Disposition` is the only header replaced: active content defaults to `attachment`, while safe text types (plain text, CSV, Markdown, JSON, YAML, PAC) are inline.
 - Resource governance: global/per-host concurrency semaphores, global RPS, connection/header/read-idle timeouts, maximum URL/response bytes, inbound header and connection limits, and an optional global egress token bucket (`limits.max_egress_bytes_per_second`).
 - Observability: request-scoped structured logs without full URLs, query strings or tokens; stable error codes.
 - Low footprint: one shared `reqwest::Client`; permits are released with the body; client disconnects cancel the upstream stream.

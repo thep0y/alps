@@ -23,7 +23,7 @@ Out of scope for P0: arbitrary HTTP methods, CONNECT, WebSocket, uploads; upstre
 6. Outbound connections only use addresses returned by SecureResolver; the repository forbids `.resolve()` / `.resolve_to_addrs()`.
 7. `.no_proxy()` disables environment proxies.
 8. Request/response headers use strict allowlists; hop-by-hop and `Connection` extension fields are stripped.
-9. `nosniff` / `no-referrer` / `CSP sandbox` are forced. Active content stays `attachment`; safe text types (`text/plain`, CSV, Markdown, JSON, PAC) may be served `inline`.
+9. Only file-semantics headers are forwarded; active content stays `attachment`, while safe text types (`text/plain`, CSV, Markdown, JSON, PAC) may be served `inline`. No extra security headers are injected into proxied responses.
 10. Logs never contain full URLs, query strings, tokens, Authorization or Cookie.
 11. Concurrency permits live with the Body and are released when the client disconnects.
 12. Global/per-host concurrency, RPS, connection/header/read timeouts, URL length, header size and connection count all have limits.
@@ -75,7 +75,7 @@ Notes:
 
 Requests forward only `Range`, `If-Range`, `If-None-Match`, `If-Modified-Since` (optionally `Accept`) and force `Accept-Encoding: identity`. Host/Cookie/Authorization/Proxy-*/X-Forwarded-*/Connection/TE/Trailer/Upgrade/Content-* are not forwarded.
 
-Responses pass through file-semantics headers only; Set-Cookie, Location, Transfer-Encoding, Connection and fields listed in `Connection` are stripped. Security headers are forced. A valid upstream `attachment` is preserved; invalid values are removed. If no disposition remains, safe text types (`text/plain`, `text/csv`, `text/markdown`, JSON, YAML, PAC) use `inline`, while active content (HTML, SVG, XML, JavaScript, PDF and unknown types) falls back to `attachment`.
+Responses pass through file-semantics headers only; Set-Cookie, Location, Transfer-Encoding, Connection and fields listed in `Connection` are stripped. No additional security headers are injected. A valid upstream `attachment` is preserved; invalid values are removed. If no disposition remains, safe text types (`text/plain`, `text/csv`, `text/markdown`, JSON, YAML, PAC) use `inline`, while active content (HTML, SVG, XML, JavaScript, PDF and unknown types) falls back to `attachment`.
 
 204/304 send no Content-Length; HEAD preserves upstream Content-Length but sends no body.
 
