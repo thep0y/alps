@@ -62,7 +62,7 @@ gh workflow run cleanup-branches.yml
 | `kind` | `stable`, `alpha`, `beta` | Release type |
 | `dry_run` | boolean | Run validation and builds without committing, tagging or publishing |
 
-It checks out `main`, bumps the version, validates, builds x86_64 and aarch64 binaries, commits the version change to `main`, creates an annotated `v<version>` tag, and publishes a GitHub release with categorized notes and tarball/checksum assets. Alpha/beta versions are marked as pre-releases.
+It is split into four jobs. `prepare` computes and validates the next version. `build-x86_64` and `build-aarch64` then run in parallel on separate runners and upload their tarballs as workflow artifacts. `publish` downloads both artifacts, regenerates the checksums, commits the version change to `main`, creates an annotated `v<version>` tag, and publishes a GitHub release with categorized notes. Alpha/beta versions are marked as pre-releases.
 
 ### Version bump semantics
 
@@ -84,6 +84,8 @@ It checks out `main`, bumps the version, validates, builds x86_64 and aarch64 bi
 `bump` selects the target core; `kind` selects stable/alpha/beta. On an existing pre-release, `patch` keeps the current core (so it can increment, switch the identifier, or finalize with `stable`), while `minor`/`major` move to the next core. A stable version never guesses a pre-release core: `kind = alpha|beta` is always combined with an explicit `bump`.
 
 A stable release after a beta is normally made with `bump = patch`, `kind = stable`.
+
+The builds are parallelizable because each runner starts from the same pinned commit and deterministically applies the same bump. The version is not committed until both builds pass, so a failed architecture does not leave a version bump or tag behind.
 
 ### Release notes
 
