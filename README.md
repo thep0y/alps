@@ -148,8 +148,8 @@ Local load testing: `cargo run --features test-util --example dev_proxy` starts 
 - Run the `release` workflow manually with `bump = patch|minor|major` and `kind = stable|alpha|beta`. `bump` chooses the target core and `kind` chooses the release type, so a pre-release never guesses whether it belongs to the next patch, minor or major. It updates `Cargo.toml` and `Cargo.lock`, validates, builds x86_64 and aarch64 in parallel, commits the version bump to `main`, creates a `v<version>` tag, and publishes a GitHub release with PR titles classified into feature, fix, docs, CI and other sections. Alpha/beta builds are marked as pre-releases.
 - `dry_run` performs the bump, validation and builds without committing or publishing.
 - Branch protection may require a `RELEASE_TOKEN` secret (contents: write) or an explicit Actions bypass for the version-bump commit.
-- PR validation is split into independent workflows: `lint`, `test`, `release-build`, `msrv`, `cross`, `audit` and `docker`. Require the relevant checks in branch protection.
-- PR type labels are applied automatically from the head branch prefix or Conventional Commits title; conflicting `type:*` labels are removed. Adding the `automerge` label waits for the lint/test/release-build/msrv/cross/audit/docker checks, then enables native GitHub auto-merge, and removes the label after a successful merge. Label edits do not rerun validation workflows; the repository deletes merged head branches.
+- PR validation runs as jobs in `pr.yml`: `lint`, `test`, `release-build`, `msrv`, `cross`, `audit`, `docker`, followed by `automerge`. Require the relevant checks in branch protection.
+- PR type labels are applied automatically from the head branch prefix or Conventional Commits title; conflicting `type:*` labels are removed. The final `automerge` job runs after the validation jobs when the label is present, squash-merges only after the checks succeed, and removes the label. Label edits skip validation jobs; the repository deletes merged head branches.
 
 See [docs/release.md](docs/release.md) for cache keys, bump semantics, required permissions and recovery steps.
 

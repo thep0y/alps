@@ -1,0 +1,229 @@
+name: pr
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}-${{ github.event.action == 'labeled' && 'label' || 'code' }}
+  cancel-in-progress: true
+
+jobs:
+  type-label:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply one type label from branch or title
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          target="$(python3 scripts/pr_type_label.py --branch "${HEAD_REF}" --title "${TITLE}")"
+          if [[ -z "${target}" ]]; then
+            echo "no type mapping for branch/title"
+            exit 0
+          fi
+
+          current="$(gh pr view "${NUMBER}" --repo "${REPO}" --json labels --jq '.labels[].name')"
+          while IFS= read -r label; do
+            [[ "${label}" == type:* ]] || continue
+            [[ "${label}" == "${target}" ]] && continue
+            encoded="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${label}")"
+            gh api --method DELETE "repos/${REPO}/issues/${NUMBER}/labels/${encoded}" >/dev/null 2>&1 || true
+          done <<< "${current}"
+
+          gh api --method POST "repos/${REPO}/issues/${NUMBER}/labels" -f "labels[]=${target}" >/dev/null
+          echo "applied ${target}"
+
+  lint:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: debug
+          save-if: false
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: debug
+          save-if: false
+      - run: cargo test --all-features
+
+  release-build:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: release
+          save-if: false
+      - run: cargo build --release --locked
+
+  msrv:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: msrv
+          save-if: false
+      - run: cargo build --locked
+
+  cross:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: alps-v1
+          shared-key: cross-release
+          save-if: false
+      - run: cross build --release --locked --target aarch64-unknown-linux-gnu
+
+  audit:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          tags: alps:ci
+          cache-from: type=gha,scope=alps-docker
+
+  automerge:
+    needs: [lint, test, release-build, msrv, cross, audit, docker]
+    concurrency:
+      group: automerge-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    if: >
+      always() && !cancelled() &&
+      contains(github.event.pull_request.labels.*.name, 'automerge') &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        github.event.action == 'labeled' ||
+        (
+          needs.lint.result == 'success' &&
+          needs.test.result == 'success' &&
+          needs['release-build'].result == 'success' &&
+          needs.msrv.result == 'success' &&
+          needs.cross.result == 'success' &&
+          needs.audit.result == 'success' &&
+          needs.docker.result == 'success'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Merge after checks and remove the label
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+
+          payload="$(gh pr view "${PR_URL}" --json state,headRefOid,statusCheckRollup)"
+          state="$(jq -r '.state' <<<"${payload}")"
+          head_sha="$(jq -r '.headRefOid' <<<"${payload}")"
+
+          if [[ "${state}" == "MERGED" ]]; then
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/labels/automerge" >/dev/null 2>&1 || true
+            echo "already merged; removed automerge label"
+            exit 0
+          fi
+          if [[ "${state}" == "CLOSED" ]]; then
+            echo "closed without merge; keeping the automerge label"
+            exit 0
+          fi
+
+          required='["lint","test","release-build","msrv","cross","audit","docker"]'
+          statuses="$(jq -r --argjson required "${required}" '
+            [(.statusCheckRollup // [])[] | {name:(.name // .context), status, conclusion, state}] as $checks |
+            $required | map(
+              . as $name |
+              ($checks | map(select(.name == $name)) | first) as $check |
+              if $check == null then "MISSING"
+              elif (($check.conclusion // $check.state // $check.status) == "SUCCESS") then "SUCCESS"
+              elif (($check.conclusion // $check.state // $check.status) | IN("FAILURE","CANCELLED","TIMED_OUT","ACTION_REQUIRED","STARTUP_FAILURE","SKIPPED")) then "FAILURE"
+              else "PENDING" end
+            ) | join(" ")
+          ' <<<"${payload}")"
+          echo "checks: ${statuses}"
+
+          if grep -q 'FAILURE' <<<"${statuses}"; then
+            echo "a required check failed; not merging" >&2
+            exit 1
+          fi
+          if grep -qE 'MISSING|PENDING' <<<"${statuses}"; then
+            echo "checks are not complete yet; the running code workflow will merge when they are"
+            exit 0
+          fi
+
+          if ! gh pr merge --squash --match-head-commit "${head_sha}" "${PR_URL}"; then
+            state="$(gh pr view "${PR_URL}" --json state --jq '.state')"
+            if [[ "${state}" != "MERGED" ]]; then
+              echo "merge failed; keeping the automerge label" >&2
+              exit 1
+            fi
+            echo "already merged by another run"
+          fi
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/labels/automerge" >/dev/null 2>&1 || true
+          echo "merged and removed automerge label"
