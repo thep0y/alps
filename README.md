@@ -144,13 +144,12 @@ Local load testing: `cargo run --features test-util --example dev_proxy` starts 
 
 ## CI and release
 
-- The `warm-cache` workflow saves separate debug and release Cargo/target caches only on pushes to `main`; the `ci` workflow runs on pull requests only and restores them without overwriting. The release profile's thin LTO cache is never mixed with the debug cache.
+- The `warm-cache` workflow saves separate debug and release Cargo/target caches only on pushes to `main`; the pull-request validation workflows restore them without overwriting. The release profile's thin LTO cache is never mixed with the debug cache.
 - Run the `release` workflow manually with `bump = patch|minor|major` and `kind = stable|alpha|beta`. `bump` chooses the target core and `kind` chooses the release type, so a pre-release never guesses whether it belongs to the next patch, minor or major. It updates `Cargo.toml` and `Cargo.lock`, validates, builds x86_64 and aarch64 in parallel, commits the version bump to `main`, creates a `v<version>` tag, and publishes a GitHub release with PR titles classified into feature, fix, docs, CI and other sections. Alpha/beta builds are marked as pre-releases.
 - `dry_run` performs the bump, validation and builds without committing or publishing.
 - Branch protection may require a `RELEASE_TOKEN` secret (contents: write) or an explicit Actions bypass for the version-bump commit.
-- Require the `ci-success` check for pull requests; it aggregates lint, test, release-build, msrv, cross, audit and docker.
-- Add the `automerge` label to a non-draft PR from this repository; after `ci-success`, CI squash-merges it and deletes the head branch. Branch protection and required reviews still apply.
-- The repository auto-deletes merged head branches; the `cleanup-branches` workflow also removes leftovers on PR close and provides a manual sweep for older merged branches.
+- PR validation is split into independent workflows: `lint`, `test`, `release-build`, `msrv`, `cross`, `audit` and `docker`. Require the relevant checks in branch protection.
+- Label changes do not trigger any validation workflow. Auto-merge and post-merge head-branch deletion are repository settings, not workflows; enable auto-merge per PR through GitHub if needed.
 
 See [docs/release.md](docs/release.md) for cache keys, bump semantics, required permissions and recovery steps.
 
