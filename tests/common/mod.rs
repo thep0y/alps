@@ -31,6 +31,7 @@ pub async fn start_upstream() -> u16 {
         .route("/inspect", get(inspect))
         .route("/redirect", get(redirect_relative))
         .route("/redirect-external", get(redirect_external))
+        .route("/redirect-to-redirect-host", get(redirect_to_redirect_host))
         .route("/not-modified", get(not_modified))
         .route("/large", get(large))
         .route("/large-128k", get(large_128k))
@@ -146,6 +147,22 @@ async fn redirect_external() -> Response {
     Response::builder()
         .status(StatusCode::FOUND)
         .header(axum::http::header::LOCATION, "http://evil.test/file")
+        .body(Body::empty())
+        .unwrap()
+}
+
+async fn redirect_to_redirect_host(headers: HeaderMap) -> Response {
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("upstream.test:80");
+    let port = host.rsplit_once(':').map(|(_, port)| port).unwrap_or("80");
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header(
+            axum::http::header::LOCATION,
+            format!("http://redirect.test:{port}/file"),
+        )
         .body(Body::empty())
         .unwrap()
 }

@@ -15,7 +15,7 @@ ALPS is not a general-purpose forward proxy and not a transparent reverse proxy:
 ## Features
 
 - Deny by default: an empty allowlist rejects everything; HTTPS only by default; IP literals, userinfo, fragments and control characters are rejected.
-- Validation on every hop: ALPS owns the redirect chain and revalidates scheme, host, port and IP for each new URL, with loop detection and a hop limit.
+- Validation on every hop: ALPS owns the redirect chain and revalidates scheme, host, port and IP for each new URL, with loop detection and a hop limit. A separate redirect-only allowlist can permit CDN targets (for example GitHub release assets) without making them valid initial targets.
 - DNS rebinding defense: a custom `reqwest` resolver only hands connector-approved IPs to the transport and system proxies are disabled.
 - File semantics: streaming body (no collect), backpressure, `Range` / `If-Range` / `If-None-Match` / `If-Modified-Since`, 206/304/416 passthrough.
 - Response policy: only file-semantics headers are forwarded; `Set-Cookie`, `Location` and hop-by-hop headers are stripped. `Content-Disposition` is the only header replaced: active content defaults to `attachment`, while safe text types (plain text, CSV, Markdown, JSON, YAML, PAC) are inline.
@@ -95,7 +95,28 @@ Configuration is TOML, validated at startup; unknown fields fail startup. Secret
 
 When neither is set, startup uses the first existing file in this order: `$HOME/.coinfig/alps/alps.toml`, `$HOME/.alps.toml`, then `<binary directory>/alps.toml`.
 
-Additional blocks: `[cors] allowed_origins` (exact origins; empty disables CORS), `[server] http2`, `[web] dir` / `expose_api` (optional static UI), per-rule `path_prefixes`, and `limits.max_egress_bytes_per_second`.
+Additional blocks: `[cors] allowed_origins` (exact origins; empty disables CORS), `[server] http2`, `[web] dir` / `expose_api` (optional static UI), per-rule `path_prefixes`, `[[redirect_allowlist]]`, and `limits.max_egress_bytes_per_second`.
+
+GitHub release downloads redirect from `github.com` to a signed CDN host. Keep the initial host in `[[allowlist]]` and add only the redirect destination as a redirect-only rule:
+
+```toml
+[[allowlist]]
+host = "github.com"
+schemes = ["https"]
+ports = [443]
+
+[[redirect_allowlist]]
+host = "release-assets.githubusercontent.com"
+schemes = ["https"]
+ports = [443]
+
+[[redirect_allowlist]]
+host = "objects.githubusercontent.com"
+schemes = ["https"]
+ports = [443]
+```
+
+A redirect-only host is never accepted as the initial request target. Every hop still checks scheme, port, path prefix, IP literals, DNS and resolved IP policy.
 
 Safety switches that cannot be disabled (startup fails if set to `false`): `security.block_non_global_ips`, `block_ip_literal_hosts`, `no_system_proxy`, `logging.redact_url_query`; `default_content_disposition` only accepts `attachment`.
 
@@ -107,9 +128,9 @@ See [docs/configuration.md](docs/configuration.md) for the complete field refere
 
 ## Security model
 
-- The allowlist is the security boundary: only administrator-listed domains, ports and schemes are reachable. There is no "trust any redirect after the first hop" mode.
+- The allowlist is the security boundary: only administrator-listed domains, ports and schemes are reachable. A redirect-only list can explicitly add CDN hosts for redirect hops, but it never authorizes an initial target. There is no "trust any redirect after the first hop" mode.
 - Outbound IPs must be globally routable: loopback, private, link-local, CGNAT, multicast, reserved, documentation, IPv4-mapped IPv6, NAT64, 6to4, ULA and Teredo ranges are rejected; IPv6 is limited to `2000::/3`.
-- Every redirect and every new connection is revalidated; connections use the verified addresses returned by SecureResolver.
+- Every redirect and every new connection is revalidated against the normal or redirect-only allowlist; connections use the verified addresses returned by SecureResolver.
 - Client `Host`, `Cookie`, `Authorization` and `X-Forwarded-*` headers are not forwarded; `Referer` is not forged.
 - Logs omit full URLs, query strings, signing parameters and tokens; reqwest errors have their URL removed before logging.
 - Signed links are bearer capabilities: default TTL 5 minutes, maximum TTL configurable; signing never bypasses allowlist/IP checks. During rotation, old links remain valid while the previous secret is configured.

@@ -70,7 +70,8 @@ ports = [443]
 | `[metrics]` | No | Prometheus admin listener. |
 | `[cors]` | No | Exact browser origins and preflight cache. |
 | `[web]` | No | Optional public UI and `/?url=` proxy route. |
-| `[[allowlist]]` | Yes in practice | Destination domain rules; empty denies all. |
+| `[[allowlist]]` | Yes in practice | Initial destination domain rules; empty denies all. |
+| `[[redirect_allowlist]]` | No | Additional rules that apply only to redirect hops. |
 | `[logging]` | No | Filter, format, redaction. |
 
 Omitted sections use the defaults listed below. `serde(deny_unknown_fields)` is enabled at every level.
@@ -214,6 +215,37 @@ path_prefixes = ["/releases/", "/pub/"]
 # allowlist = []
 ```
 
+### Redirect-only rules
+
+`[[redirect_allowlist]]` uses exactly the same fields as `[[allowlist]]` (host, subdomain matching, schemes, ports and path prefixes). The difference is scope:
+
+- The initial request target must match `[[allowlist]]`; redirect-only rules are ignored there.
+- A redirect hop is accepted when it matches either `[[allowlist]]` or `[[redirect_allowlist]]`.
+- Every hop still checks userinfo, fragment, IP literals, resolved IP policy, scheme, port and path prefix before the list check.
+- A rule in `[[redirect_allowlist]]` is therefore not a general proxy authorization; it only permits that host as the destination of a redirect from an already-authorized initial request.
+
+This is intended for origins that hand downloads to a CDN, such as GitHub releases:
+
+```toml
+[[allowlist]]
+host = "github.com"
+schemes = ["https"]
+ports = [443]
+
+[[redirect_allowlist]]
+host = "release-assets.githubusercontent.com"
+schemes = ["https"]
+ports = [443]
+
+[[redirect_allowlist]]
+host = "objects.githubusercontent.com"
+schemes = ["https"]
+ports = [443]
+```
+
+Add only the redirect hosts you actually need. Redirect chains remain subject to the normal hop limit and loop detection.
+
+
 ## 14. `[logging]`
 
 | Field | Type | Default | Constraints and behavior |
@@ -238,6 +270,7 @@ Logs omit full URLs, query strings, signed tokens, authorization headers and coo
 | `http requires proxy.allow_http` | `http` scheme with `allow_http = false` | Enable only for trusted networks, or use HTTPS. |
 | `cors.allowed_origins` error | Wildcard, path, query or invalid origin | Use an exact origin such as `https://app.example.org`. |
 | `path_prefixes` error | Missing `/`, `..` segment, query/fragment or too long | Use a literal normalized path prefix. |
+| `redirect_allowlist` error | Same host/scheme/port/path constraints as `allowlist` | Fix the rule; redirect-only hosts can never be initial targets. |
 | `metrics.listen` error | Same address as `server.listen` | Use a different admin address/port. |
 
 ## 16. Complete example

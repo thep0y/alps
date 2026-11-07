@@ -205,6 +205,28 @@ schemes = ["https"]
 ports = [443]
 path_prefixes = ["/downloads/"]
 
+# Redirect-only rules. The initial request must still match [[allowlist]];
+# a redirect hop may match either [[allowlist]] or [[redirect_allowlist]].
+# Scheme, port, path prefix, DNS and resolved-IP checks still apply, and a
+# redirect-only host can never be used as the initial request target.
+#
+# GitHub release downloads redirect to signed CDN hosts. Enable only the
+# destinations your workflows need, for example:
+#
+# [[redirect_allowlist]]
+# host = "release-assets.githubusercontent.com"
+# include_subdomains = false
+# schemes = ["https"]
+# ports = [443]
+# path_prefixes = []
+#
+# [[redirect_allowlist]]
+# host = "objects.githubusercontent.com"
+# include_subdomains = false
+# schemes = ["https"]
+# ports = [443]
+# path_prefixes = []
+
 [logging]
 # Tracing filter using EnvFilter syntax, e.g. "info", "debug",
 # "alps=debug,tower=warn". Invalid filters fail startup. Default: "info".

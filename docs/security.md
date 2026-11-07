@@ -66,7 +66,7 @@ Notes:
 ## 5. Redirects
 
 - Follow only 301/302/303/307/308; 304 is passed through as a final response.
-- Every hop goes through `UrlPolicy`; "trust later domains after the first hop" is not allowed.
+- Every hop goes through `UrlPolicy`; "trust later domains after the first hop" is not allowed. The initial target must match `[[allowlist]]`. A redirect hop may additionally match an explicit `[[redirect_allowlist]]` rule, which can never authorize an initial target. Scheme, port, path, IP-literal, DNS and resolved-IP checks still run for every hop.
 - Loop detection uses normalized URLs (including query); default maximum is 5 hops.
 - Cross-origin redirects carry no client credentials: the request header allowlist never includes Authorization/Cookie.
 - Client `Host` is not sent upstream; TLS SNI/certificate validation uses the target URL's domain.
@@ -153,7 +153,7 @@ Error responses contain only stable error codes and generic messages; target URL
 
 ## 16. Test coverage
 
-The web tests cover static index/assets, CSP and cache headers, hidden API routes, unauthenticated public `/?url=`, bearer-protected `/v1/proxy` when exposed, Range forwarding on the public route, malformed queries and path-traversal rejection.
+The web tests cover static index/assets, CSP and cache headers, hidden API routes, unauthenticated public `/?url=`, bearer-protected `/v1/proxy` when exposed, Range forwarding on the public route, malformed queries and path-traversal rejection. Redirect tests cover redirect-only allowlist success, redirect-only hosts rejected as initial targets, and the existing unlisted-host denial path.
 
 - Unit: allowlist label boundaries, IDNA/trailing dots, userinfo/fragment/IP literals, IP tables, header filtering, CD sanitization, constant-time auth, permit lifecycle, query fidelity, signing expiry/tampering/rotation, per-IP buckets, trusted-proxy parsing, path-prefix and CORS normalization, egress token bucket.
 - Integration: real TCP end-to-end, Range/206/416, 304, HEAD, redirect per-hop/loop, cross-origin rejection, private-IP rejection (403 ip_denied), credential stripping, max response bytes, signing issue/fetch, metrics text, snapshot swap, per-IP limiting, CORS preflight, h2c.

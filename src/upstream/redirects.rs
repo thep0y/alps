@@ -113,7 +113,7 @@ impl RedirectController {
                 .url()
                 .join(location)
                 .map_err(|_| ProxyError::UpstreamRedirectError)?;
-            let next = match self.policy.validate_url(next_url) {
+            let next = match self.policy.validate_redirect_url(next_url) {
                 Ok(next) => next,
                 Err(PolicyError::InvalidUrl)
                 | Err(PolicyError::TooLong)

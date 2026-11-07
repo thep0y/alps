@@ -82,6 +82,7 @@ async fn main() -> ExitCode {
     info!(
         listen = %address,
         allowlist_rules = state.policy.allowlist_len(),
+        redirect_allowlist_rules = state.policy.redirect_allowlist_len(),
         signing = state.signer.enabled(),
         web_static = web_enabled,
         web_api = web_expose_api,

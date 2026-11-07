@@ -61,3 +61,13 @@ This file records ALPS decisions about optional P2 enhancements. It supplements 
 **Decision**: Add `[web] dir` (also `--static-dir` / `ALPS_STATIC_DIR`). ALPS serves the built static tree and mounts a public `GET/HEAD /?url=...` route that runs the existing proxy pipeline without bearer auth. With the default `web.expose_api = false`, `/v1/proxy`, `/v1/sign` and `/p/{token}` are not exposed; the public surface is only the UI, `/?url=`, `/healthz`, `/readyz` and static assets. If the API is needed, `expose_api = true` reuses the existing auth rules.
 
 **Consequences**: Production requires no Node runtime; only a one-time build produces `web/dist`. The public `/?url=` route is unauthenticated and the allowlist becomes the sole content boundary, so this mode is opt-in by setting `web.dir`. The static directory is startup-level and requires a restart; `expose_api` is guarded per request and can follow SIGHUP. A separate Node gateway remains unnecessary.
+
+## ADR-012: Redirect-only allowlist for CDN hops
+
+**Status**: Implemented
+
+**Context**: Some allowlisted origins hand downloads to a CDN. GitHub releases redirect from `github.com` to a signed host such as `release-assets.githubusercontent.com` or `objects.githubusercontent.com`. Revalidating every hop is required, but automatically trusting any redirect target would weaken the allowlist. Putting CDN hosts in the normal allowlist would also make them valid initial request targets.
+
+**Decision**: Add a separate `[[redirect_allowlist]]`. The initial target must match `[[allowlist]]`; a redirect hop may match either list. Redirect-only rules use the same host/subdomain/scheme/port/path fields. Every hop still goes through userinfo, fragment, IP-literal, scheme, port, path, DNS and resolved-IP checks. Redirect-only hosts can never be used as initial targets.
+
+**Consequences**: Operators must list the CDN destinations they explicitly trust for redirects. GitHub release downloads work after adding the GitHub CDN hosts, without trusting all redirects or making the CDN a general entry point. Redirect chains remain subject to loop detection and the hop limit.

@@ -147,6 +147,7 @@ async fn readyz(State(handle): State<Arc<AppHandle>>) -> Response {
     Json(serde_json::json!({
         "status": "ready",
         "allowlist_rules": state.policy.allowlist_len(),
+        "redirect_allowlist_rules": state.policy.redirect_allowlist_len(),
     }))
     .into_response()
 }
