@@ -2,10 +2,23 @@ const EXPLICIT_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 const MAX_URL_BYTES = 8192;
 
+export type TargetErrorCode =
+  | "empty"
+  | "control"
+  | "invalid"
+  | "unsupported_scheme"
+  | "missing_host"
+  | "credentials"
+  | "fragment"
+  | "too_long";
+
 export class TargetError extends Error {
-  constructor(message: string) {
+  readonly code: TargetErrorCode;
+
+  constructor(code: TargetErrorCode, message: string) {
     super(message);
     this.name = "TargetError";
+    this.code = code;
   }
 }
 
@@ -17,10 +30,10 @@ export class TargetError extends Error {
 export function normalizeTarget(raw: string): string {
   const value = raw.trim();
   if (!value) {
-    throw new TargetError("Enter a file URL to continue.");
+    throw new TargetError("empty", "Enter a file URL to continue.");
   }
   if (CONTROL_RE.test(value)) {
-    throw new TargetError("The URL contains invalid control characters.");
+    throw new TargetError("control", "The URL contains invalid control characters.");
   }
 
   // Match ALPS: a scheme is recognized only when it is followed by "://".
@@ -36,25 +49,25 @@ export function normalizeTarget(raw: string): string {
   try {
     parsed = new URL(candidate);
   } catch {
-    throw new TargetError("Enter a valid absolute URL.");
+    throw new TargetError("invalid", "Enter a valid absolute URL.");
   }
 
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new TargetError("Only http and https URLs are supported.");
+    throw new TargetError("unsupported_scheme", "Only http and https URLs are supported.");
   }
   if (!parsed.hostname) {
-    throw new TargetError("The URL must include a host name.");
+    throw new TargetError("missing_host", "The URL must include a host name.");
   }
   if (parsed.username || parsed.password) {
-    throw new TargetError("URLs with embedded credentials are not supported.");
+    throw new TargetError("credentials", "URLs with embedded credentials are not supported.");
   }
   if (parsed.hash) {
-    throw new TargetError("Remove the #fragment from the URL.");
+    throw new TargetError("fragment", "Remove the #fragment from the URL.");
   }
 
   const normalized = parsed.toString();
   if (new TextEncoder().encode(normalized).byteLength > MAX_URL_BYTES) {
-    throw new TargetError("The URL is too long.");
+    throw new TargetError("too_long", "The URL is too long.");
   }
   return normalized;
 }

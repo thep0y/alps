@@ -188,7 +188,8 @@ to static files and served directly by ALPS; no Node process is needed at
 runtime. With `[web] dir` set, the browser calls only `GET/HEAD /?url=...` and
 ALPS runs its normal allowlist, SSRF and streaming pipeline. The JSON API is
 hidden by default, so `/v1/proxy`, `/v1/sign` and `/p/{token}` are not
-reachable on the public listener.
+reachable on the public listener. The page title is `ALPS`; UI copy
+auto-detects Chinese or English from the browser language.
 
 ```text
 browser --HTTPS--> Caddy/Nginx :443

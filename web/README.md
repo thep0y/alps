@@ -6,6 +6,11 @@ built files from a directory and handles `GET/HEAD /?url=...` directly.
 
 There is no second HTTP server and no production Node process.
 
+The page title is `ALPS`. UI copy is available in Chinese and English; the
+browser language is detected from `navigator.languages` (any `zh-*` tag uses
+Chinese, any `en-*` tag uses English, and unsupported languages fall back to
+English).
+
 ## How it works
 
 ```text
