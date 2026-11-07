@@ -45,4 +45,21 @@ describe("target normalization", () => {
     const target = "https://files.example.org/" + "a".repeat(9000);
     assert.throws(() => normalizeTarget(target), TargetError);
   });
+
+  it("exposes stable codes for localization", () => {
+    const cases = [
+      ["", "empty"],
+      ["https://files.example.org/a\u0000b", "control"],
+      ["ftp://files.example.org/x", "unsupported_scheme"],
+      ["https://user:pass@files.example.org/x", "credentials"],
+      ["https://files.example.org/x#fragment", "fragment"],
+    ];
+
+    for (const [value, code] of cases) {
+      assert.throws(
+        () => normalizeTarget(value),
+        (error) => error instanceof TargetError && error.code === code,
+      );
+    }
+  });
 });

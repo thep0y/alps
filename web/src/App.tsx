@@ -1,4 +1,5 @@
 import { For, Match, Show, Switch, createMemo, createSignal } from "solid-js";
+import { type FeatureIconName, t } from "./lib/i18n";
 import { ProxyRequestError, probeTarget, proxyUrl } from "./lib/proxy";
 import { TargetError, normalizeTarget } from "./lib/target";
 
@@ -14,25 +15,7 @@ type UiState =
       contentType?: string;
     };
 
-const FEATURES = [
-  {
-    icon: "shield",
-    title: "Allowlist enforced",
-    body: "The destination is checked before a single byte is fetched. Internal addresses stay blocked.",
-  },
-  {
-    icon: "stream",
-    title: "Streamed delivery",
-    body: "Files are piped straight through with backpressure. Nothing is buffered in memory.",
-  },
-  {
-    icon: "refresh",
-    title: "Range friendly",
-    body: "Resumable downloads and conditional requests are passed through to the origin.",
-  },
-] as const;
-
-type FeatureIconName = (typeof FEATURES)[number]["icon"];
+const FEATURES: readonly FeatureIconName[] = ["shield", "stream", "refresh"];
 
 export default function App() {
   const [input, setInput] = createSignal("");
@@ -67,10 +50,7 @@ export default function App() {
     } catch (error) {
       setState({
         kind: "error",
-        message:
-          error instanceof TargetError
-            ? error.message
-            : "Enter a valid file URL.",
+        message: error instanceof TargetError ? t.targetErrors[error.code] : t.targetErrors.invalid,
       });
       return;
     }
@@ -82,7 +62,7 @@ export default function App() {
       setState({
         kind: "ready",
         target,
-        filename: metadata.filename ?? filenameFromTarget(target),
+        filename: metadata.filename ?? filenameFromTarget(target, t.downloadFallback),
         size: metadata.size,
         contentType: metadata.contentType,
       });
@@ -91,10 +71,10 @@ export default function App() {
         kind: "error",
         message:
           error instanceof ProxyRequestError
-            ? error.message
+            ? proxyErrorMessage(error)
             : error instanceof DOMException && error.name === "AbortError"
-              ? "The request was cancelled."
-              : "The file could not be checked. Please try again.",
+              ? t.cancelled
+              : t.genericError,
       });
     }
   }
@@ -113,27 +93,24 @@ export default function App() {
               </svg>
             </div>
             <div>
-              <p class="text-sm font-semibold tracking-tight text-slate-950">File delivery</p>
-              <p class="text-xs text-slate-500">Allowlisted downloads</p>
+              <p class="text-sm font-semibold tracking-tight text-slate-950">{t.brand}</p>
+              <p class="text-xs text-slate-500">{t.brandSubtitle}</p>
             </div>
           </div>
 
           <span class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
             <span class="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
-            Allowlist enforced
+            {t.badge}
           </span>
         </header>
 
         <main class="flex-1 py-10 sm:py-16">
           <div class="max-w-2xl">
-            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Secure file delivery</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">{t.eyebrow}</p>
             <h1 class="mt-4 text-4xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-5xl">
-              Download files from an approved source.
+              {t.heading}
             </h1>
-            <p class="mt-5 max-w-xl text-base leading-7 text-slate-600">
-              Paste a direct file URL. The proxy checks the destination against its allowlist and streams the file to
-              your browser, without exposing internal service details.
-            </p>
+            <p class="mt-5 max-w-xl text-base leading-7 text-slate-600">{t.intro}</p>
           </div>
 
           <form onSubmit={handleSubmit} class="mt-10 rounded-3xl border border-slate-200 bg-white/90 p-2 shadow-2xl shadow-slate-900/5 backdrop-blur">
@@ -145,7 +122,7 @@ export default function App() {
                     <path d="M14 11a5 5 0 0 0-7.07 0L5.5 12.43a5 5 0 0 0 7.07 7.07l.7-.7" stroke-linecap="round" />
                   </svg>
                 </span>
-                <label class="sr-only" for="file-url">File URL</label>
+                <label class="sr-only" for="file-url">{t.urlLabel}</label>
                 <input
                   id="file-url"
                   type="text"
@@ -154,7 +131,7 @@ export default function App() {
                   autocapitalize="off"
                   spellcheck={false}
                   enterkeyhint="go"
-                  placeholder="https://files.example.org/report.pdf"
+                  placeholder={t.urlPlaceholder}
                   value={input()}
                   onInput={handleInput}
                   disabled={isBusy()}
@@ -171,7 +148,7 @@ export default function App() {
                   when={isBusy()}
                   fallback={
                     <>
-                      Check file
+                      {t.checkFile}
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4" aria-hidden="true">
                         <path d="M5 12h14m0 0-5-5m5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
                       </svg>
@@ -179,21 +156,19 @@ export default function App() {
                   }
                 >
                   <span class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
-                  Checking…
+                  {t.checkingButton}
                 </Show>
               </button>
             </div>
           </form>
 
-          <p class="mt-3 text-xs leading-5 text-slate-500">
-            https:// is added when the scheme is omitted. Only allowlisted destinations can be fetched.
-          </p>
+          <p class="mt-3 text-xs leading-5 text-slate-500">{t.hint}</p>
 
           <div class="mt-5" aria-live="polite">
             <Show when={state().kind === "checking"}>
               <div class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/80 p-4 text-sm text-slate-600">
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900" aria-hidden="true" />
-                <p>Checking the destination and reading file metadata…</p>
+                <p>{t.checkingMessage}</p>
               </div>
             </Show>
 
@@ -207,7 +182,7 @@ export default function App() {
                     </svg>
                   </span>
                   <div>
-                    <p class="font-semibold">Could not check the file</p>
+                    <p class="font-semibold">{t.errorTitle}</p>
                     <p class="mt-1 leading-5 text-rose-700">{value.message}</p>
                   </div>
                 </div>
@@ -225,7 +200,7 @@ export default function App() {
                         </svg>
                       </span>
                       <div class="min-w-0">
-                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">Ready to download</p>
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">{t.readyTitle}</p>
                         <p class="mt-1 truncate text-base font-semibold text-slate-950" title={value.filename}>
                           {value.filename}
                         </p>
@@ -236,7 +211,7 @@ export default function App() {
                           <Show when={value.contentType}>
                             {(type) => <span class="rounded-full bg-slate-100 px-2.5 py-1">{type()}</span>}
                           </Show>
-                          <span class="rounded-full bg-slate-100 px-2.5 py-1">Allowlist checked</span>
+                          <span class="rounded-full bg-slate-100 px-2.5 py-1">{t.allowlistChecked}</span>
                         </div>
                       </div>
                     </div>
@@ -246,7 +221,7 @@ export default function App() {
                       download={value.filename}
                       class="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 transition hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                     >
-                      Download file
+                      {t.downloadFile}
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4" aria-hidden="true">
                         <path d="M12 4v11m0 0 4-4m-4 4-4-4" stroke-linecap="round" stroke-linejoin="round" />
                         <path d="M5 19h14" stroke-linecap="round" />
@@ -258,24 +233,27 @@ export default function App() {
             </Show>
           </div>
 
-          <section class="mt-12 grid gap-3 sm:grid-cols-3" aria-label="How it works">
+          <section class="mt-12 grid gap-3 sm:grid-cols-3" aria-label={t.howItWorks}>
             <For each={FEATURES}>
-              {(feature) => (
-                <div class="rounded-2xl border border-slate-200/80 bg-white/60 p-4">
-                  <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100" aria-hidden="true">
-                    <FeatureIcon name={feature.icon} />
-                  </span>
-                  <h2 class="mt-3 text-sm font-semibold text-slate-950">{feature.title}</h2>
-                  <p class="mt-1 text-xs leading-5 text-slate-500">{feature.body}</p>
-                </div>
-              )}
+              {(icon) => {
+                const feature = t.features[icon];
+                return (
+                  <div class="rounded-2xl border border-slate-200/80 bg-white/60 p-4">
+                    <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100" aria-hidden="true">
+                      <FeatureIcon name={icon} />
+                    </span>
+                    <h2 class="mt-3 text-sm font-semibold text-slate-950">{feature.title}</h2>
+                    <p class="mt-1 text-xs leading-5 text-slate-500">{feature.body}</p>
+                  </div>
+                );
+              }}
             </For>
           </section>
         </main>
 
         <footer class="flex flex-col gap-2 border-t border-slate-200/80 py-6 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <p>Files are streamed through the server. Nothing is stored.</p>
-          <p>Only approved destinations are reachable.</p>
+          <p>{t.footerStreamed}</p>
+          <p>{t.footerApproved}</p>
         </footer>
       </div>
     </div>
@@ -304,14 +282,19 @@ function FeatureIcon(props: { name: FeatureIconName }) {
   );
 }
 
-function filenameFromTarget(target: string): string {
+function filenameFromTarget(target: string, fallback: string): string {
   try {
     const url = new URL(target);
     const segment = url.pathname.split("/").filter(Boolean).at(-1);
-    return segment ? decodeURIComponent(segment) : "Download";
+    return segment ? decodeURIComponent(segment) : fallback;
   } catch {
-    return "Download";
+    return fallback;
   }
+}
+
+function proxyErrorMessage(error: ProxyRequestError): string {
+  const byCode = error.code ? t.proxyErrors[error.code] : undefined;
+  return byCode ?? t.statusErrors[error.status] ?? t.genericError;
 }
 
 function formatBytes(bytes: number | undefined): string | undefined {
