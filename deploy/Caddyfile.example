@@ -1,0 +1,28 @@
+# TLS terminator for ALPS, including the optional static web UI.
+#
+# ALPS must listen on loopback (127.0.0.1:8080) and have [web] dir set. This
+# file only terminates TLS; it is not a second application server.
+#
+# If ALPS should use limits.trusted_proxies for per-client rate limiting, add
+# 127.0.0.1/32 to that list; the header_up below replaces a client-supplied
+# X-Forwarded-For with the observed peer.
+files.example.com {
+	# Compress only the UI assets. Do not compress downloads: the proxy must
+	# preserve Content-Length and Range semantics.
+	@assets path /assets/* /favicon.svg
+	encode @assets zstd gzip
+
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-For {remote_host}
+	}
+
+	request_body {
+		max_size 1MB
+	}
+
+	header {
+		-Server
+		-X-Powered-By
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+}

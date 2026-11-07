@@ -20,6 +20,16 @@ const EXPOSE_HEADERS: &str =
 /// configuration receive headers; everything else behaves as before.
 pub async fn layer(State(handle): State<Arc<AppHandle>>, request: Request, next: Next) -> Response {
     let state = handle.current();
+    let path = request.uri().path();
+    let api_path = path == "/v1/proxy" || path == "/v1/sign" || path.starts_with("/p/");
+
+    // The web router keeps the API handlers mounted so expose_api can be
+    // toggled safely by SIGHUP, but hidden paths must look nonexistent before
+    // authentication or a CORS preflight can reveal them.
+    if state.config.web.enabled() && !state.config.web.expose_api && api_path {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
     let origin = request
         .headers()
         .get(header::ORIGIN)
@@ -30,8 +40,7 @@ pub async fn layer(State(handle): State<Arc<AppHandle>>, request: Request, next:
         .filter(|origin| state.config.cors.allows(origin))
         .map(str::to_string);
 
-    let path = request.uri().path();
-    let is_preflight = path == "/v1/proxy" || path == "/v1/sign" || path.starts_with("/p/");
+    let is_preflight = api_path;
     if request.method() == Method::OPTIONS
         && is_preflight
         && let Some(origin) = allowed

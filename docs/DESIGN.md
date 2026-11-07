@@ -25,8 +25,8 @@ ALPS is a lightweight, stateless file proxy for low-resource servers, based on a
 |---|---|
 | P0 required | Domain allowlist, HTTPS, manual redirects, DNS/IP defenses, GET/HEAD, streaming, Range, connect timeouts, rate/concurrency limits, health checks, TOML configuration |
 | P1 priority | Configuration hot reload, HMAC short-lived signed links, per-host concurrency, Prometheus metrics, Docker/ARM releases |
-| P2 optional | Fine-grained path rules, total egress bandwidth shaping, optional disk cache, OpenTelemetry, client HTTP/2/HTTP/3 |
-| Non-goals | Forwarding arbitrary HTTP methods, HTTP CONNECT, WebSocket, upload proxying, transcoding, persistent files, default web-content rendering |
+| P2 optional | Fine-grained path rules, total egress bandwidth shaping, optional static web UI, optional disk cache, OpenTelemetry, client HTTP/2/HTTP/3 |
+| Non-goals | Forwarding arbitrary HTTP methods, HTTP CONNECT, WebSocket, upload proxying, transcoding, persistent files |
 
 ## 2. Use cases and interface contract
 
@@ -35,6 +35,7 @@ ALPS is a lightweight, stateless file proxy for low-resource servers, based on a
 | Endpoint | Function | Security requirement |
 |---|---|---|
 | `GET /v1/proxy?url=<encoded_url>` | Proxy a target file and follow redirects server-side | Authentication or trusted-network-only access |
+| `GET/HEAD /?url=<encoded_url>` | Public UI proxy when `[web] dir` is set | Allowlist only; no bearer token |
 | `HEAD /v1/proxy?url=<encoded_url>` | Fetch file metadata without a body | Same destination checks as GET |
 | `GET /p/{token}` | Shareable time-limited download link (P1) | HMAC validation, expiry, signed-content constraints |
 | `HEAD /p/{token}` | HEAD for a signed link (P1) | Same authorization rules as signed GET |
@@ -397,7 +398,7 @@ Suggested P1 metrics: `alps_requests_total{status_class}`, `alps_active_streams`
 - `0.0.0.0:8080` should only be exposed on a trusted network or behind a reverse proxy; use Caddy/Nginx for TLS and set request/connection limits.
 - Separate configuration and credentials: TOML file + environment variables/container secrets; never commit credentials.
 - Read-only rootfs, minimal Linux capabilities, `nofile` and memory limits, private-network egress firewall, systemd `Restart=on-failure`.
-- Independent download bandwidth budget and egress quota; public instances should enable authentication and rate limits by default.
+- Independent download bandwidth budget and egress quota; public instances should enable authentication and rate limits by default. The optional web UI trades bearer auth at the public `/?url=` edge for the allowlist boundary; keep `web.expose_api = false` unless the JSON API is required publicly.
 
 ## 10. Testing and acceptance
 

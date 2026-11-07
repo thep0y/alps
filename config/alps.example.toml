@@ -9,12 +9,15 @@
 #   - TOML is parsed strictly: unknown keys and wrong types fail startup.
 #   - Every value is validated before the listeners bind.
 #   - Validate without starting: alps --config config/alps.toml --check-config
+#   - Serve the built web UI: alps --config ... --static-dir /path/to/web/dist
 #
 # Secrets are never stored in this file; they are read from the environment:
 #   ALPS_API_TOKEN               >= 16 bytes, required for auth.mode = "bearer"
+#                                unless [web] dir is set with expose_api = false
 #   ALPS_SIGNING_SECRET          base64 or >= 32 raw bytes, required for signing
 #   ALPS_SIGNING_SECRET_PREVIOUS optional previous key for rotation; requires current
 #   ALPS_CONFIG                  optional configuration path instead of --config
+#   ALPS_STATIC_DIR              optional web UI directory (overrides [web] dir)
 #
 # All values shown below are the defaults unless a comment says otherwise.
 # The full field reference is docs/configuration.md.
@@ -108,14 +111,18 @@ no_system_proxy = true
 # SVG, XML, JavaScript and PDF always falls back to attachment.
 default_content_disposition = "attachment"
 # Explicitly declare that the entire listener is reachable only by trusted
-# clients. Required for auth.mode = "none" on a non-loopback listener; it does
-# not relax allowlist, DNS or IP checks. Default: false.
+# clients. Required for auth.mode = "none" on a non-loopback listener, except
+# in public web-only mode ([web] dir set with expose_api = false). It does not
+# relax allowlist, DNS or IP checks. Default: false.
 trusted_network_only = false
 
 [auth]
 # "bearer": require Authorization: Bearer $ALPS_API_TOKEN (>= 16 bytes).
-# "none": no request authentication. Allowed only on a loopback listener, or
-# on a non-loopback listener with security.trusted_network_only = true.
+# Not required when [web] dir is set with expose_api = false, because no
+# bearer-protected API route is mounted.
+# "none": no request authentication. Allowed on a loopback listener, on a
+# non-loopback listener with security.trusted_network_only = true, or when
+# [web] dir is set with expose_api = false.
 # Default: "bearer".
 mode = "bearer"
 
@@ -149,6 +156,24 @@ allowed_origins = []
 # Access-Control-Max-Age for preflight responses in seconds (0-86400).
 # Default: 600.
 max_age_secs = 600
+
+[web]
+# Optional public UI served directly by ALPS. The directory must exist and
+# contain index.html; it is canonicalized at startup. Relative paths are
+# resolved from the process working directory. The same value can be supplied
+# with --static-dir or ALPS_STATIC_DIR (CLI > env > TOML). Restart to change
+# dir; a SIGHUP that adds, removes or changes it is rejected.
+# dir = "/opt/alps/web/dist"
+#
+# When dir is set, GET/HEAD /?url=... is a public, unauthenticated proxy
+# endpoint. It still enforces the allowlist, IP policy, redirects, limits and
+# timeouts, but it does not use the bearer token. Only enable it on a listener
+# whose exposure you accept; the allowlist is the content boundary.
+#
+# Mount /v1/proxy, /v1/sign and /p/{token} on the public listener too.
+# Default false: those JSON API routes are not exposed and return 404.
+# When true, the normal [auth] rules apply to them; /?url= remains public.
+expose_api = false
 
 # One or more allowlist rules. A target is permitted only if at least one rule
 # matches its scheme, host and port, and (if set) its path prefix. An empty

@@ -8,11 +8,12 @@ license = "MIT"
 
 [dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json"] }
-tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync"] }
+tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "fs"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "stream"] }
 hyper = { version = "1.12", default-features = false, features = ["server", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["server-auto", "service", "server-graceful", "tokio"] }
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
+tower-http = { version = "0.6.11", default-features = false, features = ["fs"] }
 serde = { version = "1.0.229", default-features = false, features = ["std", "derive"] }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 url = { version = "2.5.8", default-features = false, features = ["std"] }

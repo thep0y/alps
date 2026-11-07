@@ -337,6 +337,32 @@ pub fn proxy_uri(target: &str) -> String {
     )
 }
 
+pub fn public_proxy_uri(target: &str) -> String {
+    format!("/?url={}", utf8_percent_encode(target, NON_ALPHANUMERIC))
+}
+
+pub async fn send_web(
+    handle: Arc<AppHandle>,
+    static_dir: &std::path::Path,
+    method: Method,
+    uri: String,
+    headers: &[(&str, &str)],
+) -> Response {
+    let mut builder = Request::builder().method(method).uri(uri);
+    for (name, value) in headers {
+        builder = builder.header(*name, HeaderValue::from_str(value).unwrap());
+    }
+    let service = <Router as ServiceExt<Request<Body>>>::map_response(
+        routes::web_router(handle, static_dir.to_path_buf()),
+        routes::strip_bodyless_lengths,
+    );
+    let mut request = builder.body(Body::empty()).unwrap();
+    request
+        .extensions_mut()
+        .insert(ClientAddr(SocketAddr::from(([127, 0, 0, 1], 12345))));
+    service.oneshot(request).await.unwrap()
+}
+
 pub fn handle_for(state: Arc<AppState>) -> Arc<AppHandle> {
     AppHandle::new(state)
 }

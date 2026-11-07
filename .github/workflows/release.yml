@@ -208,8 +208,48 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  build-web:
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web UI
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run check
+
+      - name: Package web UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -czf "dist/alps-web-${TAG}.tar.gz" -C web dist README.md -C .. LICENSE
+
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alps-web
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
   publish:
-    needs: [prepare, build-x86_64, build-aarch64]
+    needs: [prepare, build-x86_64, build-aarch64, build-web]
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.prepare.outputs.tag }}

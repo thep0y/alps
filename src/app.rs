@@ -20,6 +20,8 @@ pub enum ReloadError {
     Config(#[from] ConfigError),
     #[error(transparent)]
     App(#[from] AppError),
+    #[error("web.dir is a startup setting; restart ALPS to change it")]
+    WebDirChanged,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -108,6 +110,19 @@ impl AppHandle {
 /// Listener addresses and inbound server limits require a restart; the policy,
 /// allowlist, auth token, signing keys, limits and upstream client are swapped.
 pub fn reload_from_path(path: &Path) -> Result<Arc<AppState>, ReloadError> {
-    let loaded = Config::load(path)?;
+    reload_from_path_with(path, None, None)
+}
+
+/// Reload while preserving a CLI `--static-dir` override and enforcing that
+/// the startup web directory cannot change under a live static service.
+pub fn reload_from_path_with(
+    path: &Path,
+    static_dir: Option<&Path>,
+    expected_web_dir: Option<&Path>,
+) -> Result<Arc<AppState>, ReloadError> {
+    let loaded = Config::load_with(path, static_dir.map(Path::to_path_buf))?;
+    if loaded.config.web.dir.as_deref() != expected_web_dir {
+        return Err(ReloadError::WebDirChanged);
+    }
     Ok(AppState::build(&loaded)?)
 }

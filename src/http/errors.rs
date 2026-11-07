@@ -151,7 +151,9 @@ pub fn error_response(error: &ProxyError, request_id: &str, is_head: bool) -> Re
     let mut builder = Response::builder()
         .status(error.status())
         .header(header::CONTENT_TYPE, "application/json")
-        .header(header::CACHE_CONTROL, "no-store");
+        .header(header::CACHE_CONTROL, "no-store")
+        .header("x-error-code", error.code())
+        .header(crate::telemetry::REQUEST_ID_HEADER, request_id);
 
     if let StatusCode::UNAUTHORIZED = error.status() {
         builder = builder.header(header::WWW_AUTHENTICATE, "Bearer realm=\"alps\"");
@@ -198,6 +200,8 @@ mod tests {
         let response = error_response(&ProxyError::DestinationDenied, "req-1", false);
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(response.headers()["x-error-code"], "destination_denied");
+        assert_eq!(response.headers()["x-request-id"], "req-1");
     }
 
     #[test]

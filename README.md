@@ -8,7 +8,7 @@ ALPS is not a general-purpose forward proxy and not a transparent reverse proxy:
 
 - **P0 implemented**: allowlist, URL validation, SSRF/DNS-IP defenses, manual redirect handling, GET/HEAD, Range/206/304/416 passthrough, streaming and backpressure, concurrency/rate limits, timeouts, health checks, TOML configuration, structured logging, graceful shutdown, Docker/systemd/CI.
 - **P1 implemented**: HMAC signed links (`/p/{token}` and `/v1/sign`), Prometheus metrics on a separate admin listener, SIGHUP hot reload, per-client-IP rate limiting behind trusted proxies.
-- **P2 implemented (first batch)**: allowlist path prefixes, trusted-origin CORS including preflight, inbound HTTP/2 (h2c), global egress bandwidth shaping.
+- **P2 implemented (first batch)**: allowlist path prefixes, trusted-origin CORS including preflight, inbound HTTP/2 (h2c), global egress bandwidth shaping, optional static web UI served directly by ALPS.
 - **P2 optional items not implemented**: disk cache, OpenTelemetry, upstream HTTP/3. See [docs/decisions.md](docs/decisions.md) for the rationale.
 - **Container validation**: production image build, read-only/non-root execution, metrics/sign smoke tests, and 100-concurrent/1 GiB downloads under a 1 CPU + 256 MiB address-space limit were validated with podman. See [docs/implementation-notes.md](docs/implementation-notes.md).
 
@@ -29,6 +29,7 @@ ALPS is not a general-purpose forward proxy and not a transparent reverse proxy:
 - CORS: only exact origins listed in the configuration receive CORS headers; `OPTIONS` preflight is handled. Disabled by default; wildcards are rejected.
 - Inbound HTTP/2: optional h2c (prior knowledge) for deployments where Caddy/Nginx terminates TLS. HTTP/1.1 remains the default.
 - Egress shaping: `limits.max_egress_bytes_per_second` is a global response-body token bucket; 0 disables it. Excess chunks wait asynchronously inside the stream, propagating backpressure upstream.
+- Optional web UI: serve a prebuilt SolidJS/Tailwind directory with `[web] dir`; `GET/HEAD /?url=...` becomes a public, unauthenticated proxy path, while `/v1/proxy`, `/v1/sign` and `/p/{token}` are hidden unless `web.expose_api = true`.
 
 ## Quick start
 
@@ -66,13 +67,16 @@ curl -H "Authorization: Bearer $ALPS_API_TOKEN" \
 |---|---|---|
 | GET | `/v1/proxy?url=<encoded_url>` | Proxy a file and follow redirects server-side |
 | HEAD | `/v1/proxy?url=<encoded_url>` | Fetch file metadata without a body |
+| GET/HEAD | `/?url=<encoded_url>` | Public web UI proxy when `[web] dir` is set; no bearer token |
 | POST | `/v1/sign` | Bearer-protected; JSON `{"url":"...","expires_in_secs":300,"max_bytes":0}` returns `{"token":"...","expires_at":...}` |
 | GET/HEAD | `/p/{token}` | Proxy a file through a signed link; invalid/expired tokens return 401/403 |
 | GET | `/healthz` | Process liveness |
 | GET | `/readyz` | Startup/allowlist status (counts only) |
 | GET | `/metrics` | Admin listener only; Prometheus text format |
 
-When CORS is enabled, allowed origins receive a 204 preflight for `OPTIONS /v1/proxy`, `/v1/sign` or `/p/{token}`; other methods return `405` without contacting upstream. Set `server.http2 = true` to accept h2c (prior knowledge) on the main listener. Error responses look like:
+When CORS is enabled, allowed origins receive a 204 preflight for `OPTIONS /v1/proxy`, `/v1/sign` or `/p/{token}`; other methods return `405` without contacting upstream. Set `server.http2 = true` to accept h2c (prior knowledge) on the main listener.
+
+With `[web] dir` set and `web.expose_api = false` (the default), the public listener exposes `GET/HEAD /?url=<encoded_url>` instead of the JSON API. `/?url=` does not require a bearer token and runs the same allowlist/SSRF/streaming pipeline; `/v1/proxy`, `/v1/sign` and `/p/{token}` return `404`. Error responses look like:
 
 ```json
 {"error":{"code":"destination_denied","message":"the destination is not allowed","request_id":"..."}}
@@ -84,18 +88,20 @@ See [docs/architecture.md](docs/architecture.md) for the complete error-code lis
 
 Configuration is TOML, validated at startup; unknown fields fail startup. Secrets are read only from environment variables:
 
-- `ALPS_API_TOKEN`: required when `auth.mode = "bearer"`; at least 16 bytes.
+- `ALPS_API_TOKEN`: required when `auth.mode = "bearer"` and a bearer-protected API is mounted; at least 16 bytes. Not required when `web.dir` is set with `web.expose_api = false`.
 - `ALPS_SIGNING_SECRET`: required when `signing.enabled = true`; base64 or at least 32 raw bytes.
 - `ALPS_SIGNING_SECRET_PREVIOUS`: optional; used to validate old tokens during key rotation.
 - `ALPS_CONFIG`: optional alternative to `--config`.
 
 When neither is set, startup uses the first existing file in this order: `$HOME/.coinfig/alps/alps.toml`, `$HOME/.alps.toml`, then `<binary directory>/alps.toml`.
 
-Additional blocks: `[cors] allowed_origins` (exact origins; empty disables CORS), `[server] http2`, per-rule `path_prefixes`, and `limits.max_egress_bytes_per_second`.
+Additional blocks: `[cors] allowed_origins` (exact origins; empty disables CORS), `[server] http2`, `[web] dir` / `expose_api` (optional static UI), per-rule `path_prefixes`, and `limits.max_egress_bytes_per_second`.
 
 Safety switches that cannot be disabled (startup fails if set to `false`): `security.block_non_global_ips`, `block_ip_literal_hosts`, `no_system_proxy`, `logging.redact_url_query`; `default_content_disposition` only accepts `attachment`.
 
-`auth.mode = "none"` is allowed only on a loopback listener, or on a non-loopback listener when `security.trusted_network_only = true` is explicitly set.
+`web.dir` can also be supplied with `--static-dir <PATH>` or `ALPS_STATIC_DIR`. The directory must exist and contain `index.html`; it is canonicalized at startup. With the default `web.expose_api = false`, no bearer-protected API is exposed, so `ALPS_API_TOKEN` is not required and `auth.mode = "none"` is allowed on a public listener. If `web.expose_api = true`, the normal auth rules below still apply.
+
+`auth.mode = "none"` is allowed on a loopback listener, on a non-loopback listener with `security.trusted_network_only = true`, or when `web.dir` is set with `web.expose_api = false`.
 
 See [docs/configuration.md](docs/configuration.md) for the complete field reference, constraints and examples, and `config/alps.example.toml` for an annotated configuration.
 
@@ -110,6 +116,7 @@ See [docs/configuration.md](docs/configuration.md) for the complete field refere
 - Per-IP rate limiting trusts `X-Forwarded-For` only when the direct peer matches `limits.trusted_proxies`; otherwise the TCP peer address is used.
 - Path prefixes are literal matches against the normalized URL path; no wildcards or regex. Prefixes should end with `/` to avoid `/releases` matching `/releases-evil`.
 - CORS echoes only exact configured origins and never sends `Access-Control-Allow-Credentials`. Do not configure `*` (it is rejected).
+- The optional web UI's `/?url=` route is unauthenticated by design. Its content boundary is the allowlist, not the bearer token; the JSON API is hidden unless `web.expose_api = true`. Static responses receive a strict CSP and browser security headers.
 
 See [docs/security.md](docs/security.md) for details.
 
@@ -124,6 +131,12 @@ cargo audit --no-fetch   # requires a local RustSec advisory database
 ```
 
 The release profile uses thin LTO, `codegen-units = 1` and `strip = "symbols"`, while keeping `panic = "unwind"` so a panicking task does not abort the proxy process. The release binary shrank from 12.3 MB to about 8.4 MB on this machine.
+
+The optional web UI is built with Node (build-time only):
+
+```bash
+cd web && npm ci && npm run build
+```
 
 Integration tests use the `test-util` feature, which provides loopback-permitting policy and a static DNS backend only in test builds; release binaries do not contain these constructors.
 
@@ -141,18 +154,57 @@ Local load testing: `cargo run --features test-util --example dev_proxy` starts 
   ```
 - The performance/resource test image is `deploy/Dockerfile.perf` plus `deploy/perf-entrypoint.sh` (test-util fixture; never deploy it).
 - A hardened systemd unit example is `deploy/alps.service`.
+- For the optional web UI, mount the built `web/dist` directory read-only and set `[web] dir`; see [`web/README.md`](web/README.md) and [`deploy/Caddyfile.example`](deploy/Caddyfile.example).
 - Terminate TLS with Caddy/Nginx and limit ingress connections and request bodies.
 - Also restrict outbound traffic to private networks and cloud metadata endpoints at the deployment layer (defense in depth).
 - The metrics listener defaults to `127.0.0.1:9090`; do not expose it publicly.
-- Changing listener address/port, connection limits or header limits requires a restart; SIGHUP only hot-swaps policy, allowlist, auth, signing keys, limits and the upstream client configuration.
+- Changing listener address/port, connection limits, header limits or `[web] dir` requires a restart. SIGHUP hot-swaps policy, allowlist, auth, signing keys, limits, the upstream client configuration and `web.expose_api`; the static directory itself is fixed at startup.
+
+## Optional web UI
+
+The `web/` directory contains a SolidJS + Tailwind download page. It is built
+to static files and served directly by ALPS; no Node process is needed at
+runtime. With `[web] dir` set, the browser calls only `GET/HEAD /?url=...` and
+ALPS runs its normal allowlist, SSRF and streaming pipeline. The JSON API is
+hidden by default, so `/v1/proxy`, `/v1/sign` and `/p/{token}` are not
+reachable on the public listener.
+
+```text
+browser --HTTPS--> Caddy/Nginx :443
+                    |
+                    v
+              ALPS 127.0.0.1:8080
+                    |  GET /?url=... -> same proxy pipeline
+                    v
+              allowlist + DNS/IP policy + upstream
+```
+
+```toml
+[web]
+dir = "/opt/alps/web/dist"   # built by web/; must contain index.html
+expose_api = false           # default; /v1 and /p are hidden
+```
+
+Build once with Node, then deploy only the binary and `dist/`:
+
+```bash
+cd web
+npm ci
+npm run build
+alps --config /etc/alps/alps.toml --static-dir /opt/alps/web/dist
+```
+
+The public `/?url=` route is unauthenticated by design; the allowlist is the
+only content boundary in this mode. See [`web/README.md`](web/README.md) and
+[`deploy/Caddyfile.example`](deploy/Caddyfile.example) for details.
 
 ## CI and release
 
 - The `warm-cache` workflow saves separate debug, release, MSRV, cross and Docker build caches only on pushes to `main`; the pull-request validation workflows restore them without overwriting. The release profile's thin LTO cache is never mixed with the debug cache.
-- Run the `release` workflow manually with `bump = patch|minor|major` and `kind = stable|alpha|beta`. `bump` chooses the target core and `kind` chooses the release type, so a pre-release never guesses whether it belongs to the next patch, minor or major. It updates `Cargo.toml` and `Cargo.lock`, validates, builds x86_64 and aarch64 in parallel with `cross`, commits the version bump to `main`, creates a `v<version>` tag, and publishes a GitHub release with PR titles classified into feature, fix, docs, CI and other sections. Alpha/beta builds are marked as pre-releases. Release binaries target glibc 2.18.
+- Run the `release` workflow manually with `bump = patch|minor|major` and `kind = stable|alpha|beta`. `bump` chooses the target core and `kind` chooses the release type, so a pre-release never guesses whether it belongs to the next patch, minor or major. It updates `Cargo.toml` and `Cargo.lock`, validates, builds x86_64 and aarch64 in parallel with `cross`, builds a separate `alps-web-<tag>.tar.gz` frontend artifact, commits the version bump to `main`, creates a `v<version>` tag, and publishes a GitHub release with PR titles classified into feature, fix, docs, CI and other sections. Alpha/beta builds are marked as pre-releases. Release binaries target glibc 2.18.
 - `dry_run` performs the bump, validation and builds without committing or publishing.
 - Branch protection may require a `RELEASE_TOKEN` secret (contents: write) or an explicit Actions bypass for the version-bump commit.
-- PR validation runs as jobs in `pr.yml`: `lint`, `test`, `release-build`, `msrv`, `cross`, `audit`, `docker`, followed by `automerge`. Require the relevant checks in branch protection.
+- PR validation runs as jobs in `pr.yml`: `lint`, `test`, `release-build`, `msrv`, `cross`, `audit`, `docker`, `web`, followed by `automerge`. Require the relevant checks in branch protection.
 - PR type labels are applied automatically from the head branch prefix or Conventional Commits title; conflicting `type:*` labels are removed. The final `automerge` job runs after the validation jobs when the label is present, squash-merges only after the checks succeed, and removes the label. Label edits skip validation jobs; the repository deletes merged head branches.
 
 See [docs/release.md](docs/release.md) for cache keys, bump semantics, required permissions and recovery steps.

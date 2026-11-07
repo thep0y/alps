@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    @apply min-h-dvh bg-slate-50 text-slate-900 antialiased;
+  }
+
+  ::selection {
+    @apply bg-indigo-200 text-slate-950;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  .page-background {
+    background-image:
+      radial-gradient(56rem 32rem at 12% -10%, rgb(224 231 255 / 0.7), transparent 60%),
+      radial-gradient(44rem 28rem at 96% 8%, rgb(204 251 241 / 0.55), transparent 58%),
+      linear-gradient(180deg, rgb(248 250 252), rgb(241 245 249));
+  }
+
+  .dot-grid {
+    background-image: radial-gradient(rgb(100 116 139 / 0.14) 1px, transparent 1px);
+    background-size: 22px 22px;
+    mask-image: linear-gradient(to bottom, black, transparent 70%);
+  }
+}

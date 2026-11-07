@@ -1,7 +1,7 @@
 //! Configuration loading, environment overlays and startup validation.
 
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::{
@@ -33,6 +33,8 @@ pub struct Config {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub cors: CorsConfig,
+    #[serde(default)]
+    pub web: WebConfig,
     #[serde(default)]
     pub allowlist: Vec<AllowlistRule>,
     #[serde(default)]
@@ -389,6 +391,32 @@ impl CorsConfig {
     }
 }
 
+/// Optional public web UI served directly by ALPS.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct WebConfig {
+    /// Directory containing the built UI (index.html plus its assets).
+    ///
+    /// When set, GET/HEAD /?url=... becomes a public, unauthenticated proxy
+    /// endpoint and the JSON API routes are hidden unless expose_api is true.
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
+    /// Mount /v1/proxy, /v1/sign and /p/{token} on the public listener.
+    #[serde(default)]
+    pub expose_api: bool,
+}
+
+impl WebConfig {
+    pub fn enabled(&self) -> bool {
+        self.dir.is_some()
+    }
+
+    /// True when the UI is public and the JSON API is not mounted.
+    pub fn hides_api(&self) -> bool {
+        self.enabled() && !self.expose_api
+    }
+}
+
 /// Configuration plus secrets sourced from the environment.
 #[derive(Clone)]
 pub struct LoadedConfig {
@@ -432,11 +460,29 @@ fn invalid(field: &str, message: impl Into<String>) -> ConfigError {
 impl Config {
     /// Load and validate configuration from the given path, applying environment overlays.
     pub fn load(path: &Path) -> Result<LoadedConfig, ConfigError> {
+        Self::load_with(path, None)
+    }
+
+    /// Load with an optional static UI override (highest precedence).
+    ///
+    /// The precedence is CLI `--static-dir`, then the `ALPS_STATIC_DIR`
+    /// environment variable, then `web.dir` in the TOML file.
+    pub fn load_with(
+        path: &Path,
+        static_dir: Option<PathBuf>,
+    ) -> Result<LoadedConfig, ConfigError> {
         let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
             path: path.display().to_string(),
             source,
         })?;
         let mut config: Config = toml::from_str(&raw)?;
+        if let Some(dir) = static_dir.or_else(|| {
+            std::env::var_os("ALPS_STATIC_DIR")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        }) {
+            config.web.dir = Some(dir);
+        }
         let api_token = std::env::var("ALPS_API_TOKEN")
             .ok()
             .filter(|value| !value.is_empty());
@@ -452,6 +498,14 @@ impl Config {
             api_token,
             signing_secrets,
         })
+    }
+
+    /// True when the bearer token must be configured and checked.
+    ///
+    /// A public static UI hides the JSON API by default, so no protected route
+    /// is mounted and the token is not required.
+    pub fn requires_bearer_token(&self) -> bool {
+        self.auth.mode == AuthMode::Bearer && !self.web.hides_api()
     }
 
     /// Validate and normalize the configuration in place.
@@ -656,26 +710,68 @@ impl Config {
             return Err(invalid("logging.level", "not a valid tracing filter"));
         }
 
+        if self.web.expose_api && !self.web.enabled() {
+            return Err(invalid("web.expose_api", "web.expose_api requires web.dir"));
+        }
+        if let Some(dir) = self.web.dir.as_mut() {
+            if dir.as_os_str().is_empty() {
+                return Err(invalid("web.dir", "must not be empty"));
+            }
+            let metadata = std::fs::metadata(&*dir).map_err(|source| {
+                invalid(
+                    "web.dir",
+                    format!("cannot access {}: {source}", dir.display()),
+                )
+            })?;
+            if !metadata.is_dir() {
+                return Err(invalid(
+                    "web.dir",
+                    format!("{} is not a directory", dir.display()),
+                ));
+            }
+            let index = dir.join("index.html");
+            if !index.is_file() {
+                return Err(invalid(
+                    "web.dir",
+                    format!("{} does not contain index.html", dir.display()),
+                ));
+            }
+            *dir = dir.canonicalize().map_err(|source| {
+                invalid(
+                    "web.dir",
+                    format!("cannot canonicalize {}: {source}", dir.display()),
+                )
+            })?;
+        }
+
         match self.auth.mode {
             AuthMode::Bearer => {
-                let token = api_token.ok_or_else(|| {
-                    invalid(
-                        "auth.mode",
-                        "bearer mode requires the ALPS_API_TOKEN environment variable",
-                    )
-                })?;
-                if token.len() < 16 {
-                    return Err(invalid(
-                        "auth.mode",
-                        "ALPS_API_TOKEN must be at least 16 bytes long",
-                    ));
+                // With the static UI enabled and the JSON API hidden, no
+                // bearer-protected route is mounted. The public /?url= route
+                // is bounded by the allowlist and does not use this token.
+                if !self.web.hides_api() {
+                    let token = api_token.ok_or_else(|| {
+                        invalid(
+                            "auth.mode",
+                            "bearer mode requires the ALPS_API_TOKEN environment variable",
+                        )
+                    })?;
+                    if token.len() < 16 {
+                        return Err(invalid(
+                            "auth.mode",
+                            "ALPS_API_TOKEN must be at least 16 bytes long",
+                        ));
+                    }
                 }
             }
             AuthMode::None => {
-                if !listen.ip().is_loopback() && !self.security.trusted_network_only {
+                if !listen.ip().is_loopback()
+                    && !self.security.trusted_network_only
+                    && !self.web.hides_api()
+                {
                     return Err(invalid(
                         "auth.mode",
-                        "auth.mode = 'none' on a non-loopback listener requires security.trusted_network_only = true",
+                        "auth.mode = 'none' on a non-loopback listener requires security.trusted_network_only = true (or web.dir with web.expose_api = false)",
                     ));
                 }
             }
@@ -804,7 +900,7 @@ impl Config {
     /// Short, secret-free summary used by --check-config and startup logs.
     pub fn summary(&self) -> String {
         format!(
-            "listen={} allowlist_rules={} auth_mode={:?} signing={} metrics={} http2={} cors_origins={} max_active_streams={} max_redirects={}",
+            "listen={} allowlist_rules={} auth_mode={:?} signing={} metrics={} http2={} cors_origins={} web_static={} web_api={} max_active_streams={} max_redirects={}",
             self.server.listen,
             self.allowlist.len(),
             self.auth.mode,
@@ -812,6 +908,8 @@ impl Config {
             self.metrics.enabled,
             self.server.http2,
             self.cors.allowed_origins.len(),
+            self.web.enabled(),
+            self.web.expose_api,
             self.limits.max_active_streams,
             self.proxy.max_redirects,
         )
@@ -975,6 +1073,32 @@ ports = [443]
         cfg
     }
 
+    struct WebDir(PathBuf);
+
+    impl WebDir {
+        fn new() -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let index = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir =
+                std::env::temp_dir().join(format!("alps-web-test-{}-{index}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("index.html"), "<!doctype html>").unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for WebDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn normalizes_rule_hosts() {
         let cfg = base();
@@ -1016,6 +1140,66 @@ ports = [443]
         assert!(cfg.validate(None).is_err());
         cfg.security.trusted_network_only = true;
         assert!(cfg.validate(None).is_ok());
+    }
+
+    #[test]
+    fn web_public_mode_allows_none_auth_and_skips_the_bearer_token() {
+        let dir = WebDir::new();
+        let mut cfg = base();
+        cfg.server.listen = "0.0.0.0:8080".into();
+        cfg.web.dir = Some(dir.path().to_path_buf());
+
+        cfg.auth.mode = AuthMode::None;
+        cfg.validate(None).unwrap();
+
+        cfg.auth.mode = AuthMode::Bearer;
+        cfg.validate(None).unwrap();
+        assert!(!cfg.requires_bearer_token());
+        assert!(cfg.summary().contains("web_static=true"));
+    }
+
+    #[test]
+    fn web_expose_api_keeps_the_normal_auth_rules() {
+        let dir = WebDir::new();
+        let mut cfg = base();
+        cfg.server.listen = "0.0.0.0:8080".into();
+        cfg.web.dir = Some(dir.path().to_path_buf());
+        cfg.web.expose_api = true;
+
+        cfg.auth.mode = AuthMode::None;
+        assert!(cfg.validate(None).is_err());
+        cfg.security.trusted_network_only = true;
+        assert!(cfg.validate(None).is_ok());
+
+        cfg.auth.mode = AuthMode::Bearer;
+        assert!(cfg.validate(None).is_err());
+        assert!(cfg.validate(Some("0123456789abcdef")).is_ok());
+        assert!(cfg.requires_bearer_token());
+    }
+
+    #[test]
+    fn web_expose_api_requires_a_directory() {
+        let mut cfg = base();
+        cfg.web.expose_api = true;
+        assert!(cfg.validate(Some("0123456789abcdef")).is_err());
+    }
+
+    #[test]
+    fn web_directory_requires_index_html() {
+        let dir = WebDir::new();
+        std::fs::remove_file(dir.path().join("index.html")).unwrap();
+        let mut cfg = base();
+        cfg.web.dir = Some(dir.path().to_path_buf());
+        assert!(cfg.validate(Some("0123456789abcdef")).is_err());
+    }
+
+    #[test]
+    fn web_directory_is_canonicalized() {
+        let dir = WebDir::new();
+        let mut cfg = base();
+        cfg.web.dir = Some(dir.path().to_path_buf());
+        cfg.validate(Some("0123456789abcdef")).unwrap();
+        assert!(cfg.web.dir.as_ref().is_some_and(|path| path.is_absolute()));
     }
 
     #[test]

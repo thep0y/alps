@@ -48,9 +48,22 @@ No separate polling job is used.
 | `kind` | `stable`, `alpha`, `beta` | Release type |
 | `dry_run` | boolean | Run validation and builds without committing, tagging or publishing |
 
-It is split into four jobs. `prepare` computes and validates the next version. `build-x86_64` and `build-aarch64` then run in parallel on separate runners, both using `cross` so the binaries only require glibc 2.18, and upload their tarballs as workflow artifacts. `publish` downloads both artifacts, regenerates the checksums, commits the version change to `main`, creates an annotated `v<version>` tag, and publishes a GitHub release with categorized notes. Alpha/beta versions are marked as pre-releases.
+It is split into five jobs. `prepare` computes and validates the next version. `build-x86_64` and `build-aarch64` then run in parallel on separate runners, both using `cross` so the binaries only require glibc 2.18, and upload their tarballs as workflow artifacts. `build-web` builds the optional SolidJS/Tailwind UI and uploads a separate `alps-web-<tag>.tar.gz`. `publish` downloads all three artifacts, regenerates the checksums, commits the version change to `main`, creates an annotated `v<version>` tag, and publishes a GitHub release with categorized notes. Alpha/beta versions are marked as pre-releases.
 
 Both GNU/Linux artifacts are built inside the `cross` images and checked with `scripts/check_glibc.py`; the release fails if a binary requires glibc newer than 2.18. This keeps one artifact usable on older Debian/Ubuntu/RHEL hosts instead of inheriting the GitHub runner's glibc.
+
+### Web UI artifact
+
+The `build-web` job runs `npm ci`, `npm run check` and packages:
+
+```text
+alps-web-<tag>.tar.gz
+  dist/            # index.html, assets, favicon
+  README.md        # web/README.md build and configuration notes
+  LICENSE
+```
+
+Extract it, set `[web] dir` to the extracted `dist` path, and run the ALPS binary. The frontend has no version string baked into the HTML/JS; the artifact name identifies the release. The web artifact is included in `SHA256SUMS` and uploaded with the binary tarballs.
 
 ### Version bump semantics
 
