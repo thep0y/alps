@@ -39,7 +39,8 @@ axum Body::from_stream -> hyper HTTP/1 -> client
 | `src/config.rs` | TOML deserialization, environment overlays, validation, rule normalization |
 | `src/app.rs` | AppState: config, policy, resolver, client, limits, auth, redirect controller |
 | `src/server.rs` | TCP accept loop, HTTP/1 header limits, connection cap, graceful shutdown |
-| `src/http/routes.rs` | Routing, request orchestration, response construction, 304/204 header fixups |
+| `src/http/routes.rs` | Routing, request orchestration, response construction, 304/204 header fixups, public web router |
+| `src/http/web.rs` | Static UI index serving, browser security headers and cache policy |
 | `src/http/query.rs` | Raw query parsing; does not convert `+` to space |
 | `src/http/headers.rs` | Request/response header allowlists, hop-by-hop filtering, Content-Disposition |
 | `src/http/errors.rs` | ProxyError, status/error codes, JSON error body |
@@ -59,7 +60,7 @@ Dependency direction: `http -> {policy, upstream, limits, auth, telemetry}`; `up
 ## 3. Request lifecycle
 
 1. Connection admission: connection semaphore, `TCP_NODELAY`, HTTP/1 header read timeout and maximum header buffer.
-2. Route to `/v1/proxy`; methods other than GET/HEAD return 405.
+2. Route to `/v1/proxy`; methods other than GET/HEAD return 405. When `[web] dir` is set, the public listener mounts a separate router: `/` serves the SPA or, with a query string, runs the same proxy pipeline without bearer auth; `/v1/*` and `/p/*` are omitted unless `web.expose_api = true`; all other paths are served from the static directory.
 3. `request_id`: accept a valid `X-Request-Id` or generate one; echo it in the response.
 4. Bearer authentication; skipped when `auth.mode=none`.
 5. Reject GET/HEAD with a body (400).
@@ -162,6 +163,7 @@ Label values come from fixed enums or status classes; no host/URL high-cardinali
 - On SIGHUP: `Config::load` -> validate -> build a new AppState -> atomic swap. Failures keep the old state and log an error.
 - In-flight requests/streams keep the old snapshot and old Limits; new requests use the new snapshot. Metrics counters persist.
 - Server-level settings (listen address, connection caps, inbound header limits) stay with the old `Arc<Config>` and require a restart.
+- `web.dir` selects the static service at startup and cannot change on reload; a reload that adds, removes or changes it is rejected. `web.expose_api` is read per request by the CORS/API guard, so it follows SIGHUP.
 - The metrics listener is determined at startup; hot reload does not rebind it.
 - The log filter is initialized at startup; hot reload does not change the log level.
 

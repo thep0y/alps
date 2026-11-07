@@ -51,3 +51,13 @@ This file records ALPS decisions about optional P2 enhancements. It supplements 
 **Decision**: `server.http2 = true` enables h2c prior knowledge while retaining HTTP/1.1. Do not implement HTTP/1.1 Upgrade: h2c or inbound TLS.
 
 **Consequences**: Upstream callers must explicitly use h2c prior knowledge; ordinary h1 clients still work.
+
+## ADR-011: Optional public web UI is served by ALPS, not a second Node service
+
+**Status**: Implemented
+
+**Context**: A SolidJS + Tailwind frontend needs a same-origin `/?url=` endpoint. Running a separate Node gateway to rewrite that to `/v1/proxy` and inject the bearer token adds a second runtime, process supervision, image, and memory baseline to a service designed for a 1 vCPU / 256 MiB host.
+
+**Decision**: Add `[web] dir` (also `--static-dir` / `ALPS_STATIC_DIR`). ALPS serves the built static tree and mounts a public `GET/HEAD /?url=...` route that runs the existing proxy pipeline without bearer auth. With the default `web.expose_api = false`, `/v1/proxy`, `/v1/sign` and `/p/{token}` are not exposed; the public surface is only the UI, `/?url=`, `/healthz`, `/readyz` and static assets. If the API is needed, `expose_api = true` reuses the existing auth rules.
+
+**Consequences**: Production requires no Node runtime; only a one-time build produces `web/dist`. The public `/?url=` route is unauthenticated and the allowlist becomes the sole content boundary, so this mode is opt-in by setting `web.dir`. The static directory is startup-level and requires a restart; `expose_api` is guarded per request and can follow SIGHUP. A separate Node gateway remains unnecessary.

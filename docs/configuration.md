@@ -17,14 +17,17 @@ If no default file exists, ALPS attempts the binary-directory path and reports t
 
 The file must be valid UTF-8 TOML. Unknown keys, wrong types and values outside the documented ranges are startup errors; there is no permissive fallback.
 
+The optional static UI directory has its own precedence: `--static-dir <PATH>` > `ALPS_STATIC_DIR` > `[web] dir`. The directory must exist and contain `index.html`; it is canonicalized at startup.
+
 Secrets are never read from TOML:
 
 | Environment variable | Required when | Rules |
 |---|---|---|
-| `ALPS_API_TOKEN` | `auth.mode = "bearer"` | At least 16 bytes; compared in constant time. |
+| `ALPS_API_TOKEN` | `auth.mode = "bearer"` and a protected API is exposed | At least 16 bytes; compared in constant time. Not required when `web.dir` is set with `web.expose_api = false`. |
 | `ALPS_SIGNING_SECRET` | `signing.enabled = true` | Base64 (standard or URL-safe, with or without padding) decoding to at least 32 bytes, or at least 32 raw bytes. |
 | `ALPS_SIGNING_SECRET_PREVIOUS` | Optional | Same format as the current secret; only valid when `ALPS_SIGNING_SECRET` is also set. Old tokens remain valid while configured. |
 | `ALPS_CONFIG` | Optional | Alternative configuration path. |
+| `ALPS_STATIC_DIR` | Optional | Static UI directory; overrides `web.dir`. `--static-dir` overrides this variable. |
 
 Validate without binding a port:
 
@@ -38,7 +41,7 @@ The command prints a secret-free summary and exits 0 on success, 1 on a configur
 
 `SIGHUP` re-reads the same path, validates the new document, and atomically swaps the runtime snapshot. An invalid reload is logged and the previous configuration remains active. In-flight responses keep the snapshot they started with.
 
-Listener addresses, connection/header limits and the metrics listener are bound at startup and require a restart. Use `--check-config` before sending `SIGHUP`.
+Listener addresses, connection/header limits, the metrics listener and `web.dir` are startup settings and require a restart. `web.expose_api` is evaluated per request, so it can be toggled by SIGHUP while the static directory stays fixed. Use `--check-config` before sending `SIGHUP`.
 
 ## 2. Minimal configuration
 
@@ -66,6 +69,7 @@ ports = [443]
 | `[signing]` | No | HMAC-signed links and TTLs. |
 | `[metrics]` | No | Prometheus admin listener. |
 | `[cors]` | No | Exact browser origins and preflight cache. |
+| `[web]` | No | Optional public UI and `/?url=` proxy route. |
 | `[[allowlist]]` | Yes in practice | Destination domain rules; empty denies all. |
 | `[logging]` | No | Filter, format, redaction. |
 
@@ -126,9 +130,9 @@ These are defense-in-depth invariants, not tuning knobs. Keep them enabled.
 
 | Field | Type | Default | Constraints and behavior |
 |---|---|---|---|
-| `mode` | string | `bearer` | `bearer` requires `ALPS_API_TOKEN` of at least 16 bytes. `none` is allowed only on a loopback listener or with `security.trusted_network_only = true`. |
+| `mode` | string | `bearer` | `bearer` requires `ALPS_API_TOKEN` of at least 16 bytes unless `web.dir` is set with `web.expose_api = false` (no protected API is exposed). `none` is allowed on a loopback listener, with `security.trusted_network_only = true`, or when `web.dir` is set with `web.expose_api = false`. |
 
-`none` does not bypass destination policy. Use it only when the listener is unreachable from untrusted clients.
+`none` does not bypass destination policy. Use it only when the listener is unreachable from untrusted clients, or when the public `/?url=` route is intentionally the only entry point and the allowlist is the content boundary.
 
 ## 9. `[signing]`
 
@@ -159,7 +163,24 @@ The admin listener has no authentication. Bind it to loopback or a private inter
 
 CORS responses never include credentials. Preflight is handled only for `/v1/proxy`, `/v1/sign` and `/p/` paths.
 
-## 12. `[[allowlist]]`
+## 12. `[web]`
+
+| Field | Type | Default | Constraints and behavior |
+|---|---|---|---|
+| `dir` | string | unset | Directory containing the built UI. Must exist, be a directory, and contain `index.html`; canonicalized at startup. Relative paths use the process working directory. Can be overridden by `ALPS_STATIC_DIR` and `--static-dir`. Restart required. |
+| `expose_api` | boolean | `false` | Expose `/v1/proxy`, `/v1/sign` and `/p/{token}` on the public listener too. Requires `dir`. Applied on reload; hidden paths return 404 before auth or CORS preflight. |
+
+When `dir` is set:
+
+- `GET /` serves `index.html`; other paths are served from the directory as static files with directory listings disabled.
+- `GET/HEAD /?url=<encoded_url>` runs the same proxy pipeline as `/v1/proxy` (allowlist, IP policy, redirects, limits, streaming) but does **not** require a bearer token. It is a public route.
+- The JSON API routes are not reachable unless `expose_api = true`; hidden paths return `404` before auth or CORS preflight. Even with `expose_api = true`, `/?url=` remains public.
+- `auth.mode = "bearer"` does not require `ALPS_API_TOKEN` when `expose_api = false`; `auth.mode = "none"` is allowed on a non-loopback listener in that mode.
+- Public proxy responses use `Cache-Control: private, no-store` and add `X-Robots-Tag: noindex, nofollow`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `Cross-Origin-Resource-Policy: same-origin`. Static HTML gets a strict CSP; all static responses get the same hardening headers.
+
+This mode is for a deliberately limited public download page. The allowlist is the content boundary; the bearer token is not sent to browsers.
+
+## 13. `[[allowlist]]`
 
 There may be zero or more rules. A target is allowed only when at least one rule matches **the same rule's** scheme, host and port, and any configured path prefix.
 
@@ -193,7 +214,7 @@ path_prefixes = ["/releases/", "/pub/"]
 # allowlist = []
 ```
 
-## 13. `[logging]`
+## 14. `[logging]`
 
 | Field | Type | Default | Constraints and behavior |
 |---|---|---|---|
@@ -203,20 +224,22 @@ path_prefixes = ["/releases/", "/pub/"]
 
 Logs omit full URLs, query strings, signed tokens, authorization headers and cookies.
 
-## 14. Validation and troubleshooting
+## 15. Validation and troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `unknown field` | Typo or unsupported key | Remove it or consult this reference; unknown keys are never ignored. |
 | `server.listen` / `metrics.listen` error | Not `host:port` | Use a parseable `SocketAddr`, e.g. `127.0.0.1:8080`. |
-| `auth.mode` requires token | Bearer mode without `ALPS_API_TOKEN` | Export a token of at least 16 bytes. |
-| `auth.mode = 'none'` error | Non-loopback bind without declaration | Set `security.trusted_network_only = true` only if the network is genuinely trusted. |
+| `auth.mode` requires token | Bearer mode with an exposed API but without `ALPS_API_TOKEN` | Export a token of at least 16 bytes, or set `web.dir` with `web.expose_api = false`. |
+| `auth.mode = 'none'` error | Non-loopback bind without declaration | Set `security.trusted_network_only = true` only if the network is genuinely trusted, or use `web.dir` with `web.expose_api = false` for a public web-only listener. |
+| `web.dir` error | Missing path, not a directory, or no `index.html` | Build `web/` and point `web.dir` at the `dist` directory. |
+| `web.expose_api` error | `expose_api = true` without `dir` | Set `web.dir` or remove `expose_api`. |
 | `signing.enabled` requires secret | Signing enabled without `ALPS_SIGNING_SECRET` | Provide a valid secret or disable signing. |
 | `http requires proxy.allow_http` | `http` scheme with `allow_http = false` | Enable only for trusted networks, or use HTTPS. |
 | `cors.allowed_origins` error | Wildcard, path, query or invalid origin | Use an exact origin such as `https://app.example.org`. |
 | `path_prefixes` error | Missing `/`, `..` segment, query/fragment or too long | Use a literal normalized path prefix. |
 | `metrics.listen` error | Same address as `server.listen` | Use a different admin address/port. |
 
-## 15. Complete example
+## 16. Complete example
 
 The complete annotated file is [config/alps.example.toml](../config/alps.example.toml). It includes every field with its default value and the constraints above.

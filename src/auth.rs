@@ -24,6 +24,9 @@ pub enum Auth {
 
 impl Auth {
     pub fn new(config: &Config, token: Option<String>) -> Result<Self, AuthError> {
+        if !config.requires_bearer_token() {
+            return Ok(Self::Disabled);
+        }
         match config.auth.mode {
             AuthMode::Bearer => {
                 let token = token.ok_or(AuthError::Misconfigured)?;
@@ -68,6 +71,7 @@ fn constant_time_eq(expected: &[u8], provided: &[u8]) -> bool {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use std::path::PathBuf;
 
     fn auth() -> Auth {
         let mut config: Config = toml::from_str("").unwrap();
@@ -116,6 +120,15 @@ mod tests {
     #[test]
     fn disabled_auth_allows_everything() {
         let auth = Auth::Disabled;
+        assert!(auth.check(&HeaderMap::new()).is_ok());
+    }
+
+    #[test]
+    fn public_web_mode_hides_the_api_and_disables_bearer_auth() {
+        let mut config: Config = toml::from_str("").unwrap();
+        config.auth.mode = AuthMode::Bearer;
+        config.web.dir = Some(PathBuf::from("web/dist"));
+        let auth = Auth::new(&config, None).unwrap();
         assert!(auth.check(&HeaderMap::new()).is_ok());
     }
 }

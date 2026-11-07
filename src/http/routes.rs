@@ -1,6 +1,7 @@
 //! HTTP routes: health checks, the proxy endpoint and signed links.
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,12 +14,15 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use serde::Deserialize;
+use tower::ServiceExt;
+use tower_http::services::ServeDir;
 
 use crate::app::{AppHandle, AppState};
 use crate::auth::AuthError;
 use crate::http::errors::{ProxyError, error_response};
 use crate::http::headers::{self, ForwardHeaders};
 use crate::http::query;
+use crate::http::web::{self, StaticRoot};
 use crate::limits::StreamPermits;
 use crate::policy::ValidatedTarget;
 use crate::server::ClientAddr;
@@ -39,6 +43,49 @@ pub fn router(handle: Arc<AppHandle>) -> Router {
             handle.clone(),
             crate::http::cors::layer,
         ))
+        .with_state(handle)
+}
+
+/// Public web router: the static UI plus the unauthenticated `/?url=` route.
+///
+/// The JSON API handlers stay mounted but are hidden by the CORS/API guard
+/// while `web.expose_api = false`; hidden paths return 404 before auth or a
+/// preflight. The static directory is a startup setting; `expose_api` follows
+/// configuration reloads.
+pub fn web_router(handle: Arc<AppHandle>, static_dir: PathBuf) -> Router {
+    let root = Arc::new(static_dir);
+
+    // Keep the JSON API handlers mounted even when hidden. The CORS layer
+    // returns 404 for them while web.expose_api is false, so a SIGHUP toggle
+    // cannot leave an unauthenticated route behind after auth is disabled.
+    let router = Router::new()
+        .route("/", any(web_index))
+        .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
+        .route("/v1/proxy", any(proxy))
+        .route("/v1/sign", any(sign))
+        .route("/p/{token}", any(signed_proxy));
+
+    let serve_dir = ServeDir::new(root.as_path());
+    let static_service = tower::service_fn(move |request: axum::http::Request<Body>| {
+        let serve_dir = serve_dir.clone();
+        async move {
+            let response = serve_dir
+                .oneshot(request)
+                .await
+                .expect("static file service is infallible");
+            Ok::<_, std::convert::Infallible>(web::harden_static_response(response))
+        }
+    });
+
+    router
+        .fallback_service(static_service)
+        .layer(DefaultBodyLimit::max(16 * 1024))
+        .layer(axum::middleware::from_fn_with_state(
+            handle.clone(),
+            crate::http::cors::layer,
+        ))
+        .layer(Extension(StaticRoot(root)))
         .with_state(handle)
 }
 
@@ -111,6 +158,63 @@ async fn proxy(
     headers: HeaderMap,
     peer: Option<Extension<ClientAddr>>,
 ) -> Response {
+    proxy_inner(handle, method, uri, headers, peer, true).await
+}
+
+/// Public UI entry point. With a query string the request is handled by the
+/// unauthenticated proxy path; otherwise the SPA entry point is returned.
+async fn web_index(
+    State(handle): State<Arc<AppHandle>>,
+    Extension(root): Extension<StaticRoot>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    peer: Option<Extension<ClientAddr>>,
+) -> Response {
+    if uri.query().is_some() {
+        let mut response = proxy_inner(handle, method, uri, headers, peer, false).await;
+        response.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            HeaderValue::from_static("private, no-store"),
+        );
+        for (name, value) in [
+            ("x-content-type-options", "nosniff"),
+            ("referrer-policy", "no-referrer"),
+            ("x-frame-options", "DENY"),
+            ("cross-origin-resource-policy", "same-origin"),
+            ("x-robots-tag", "noindex, nofollow"),
+        ] {
+            response.headers_mut().insert(
+                axum::http::header::HeaderName::from_static(name),
+                HeaderValue::from_static(value),
+            );
+        }
+        return response;
+    }
+
+    if method != Method::GET && method != Method::HEAD {
+        let request_id = telemetry::request_id(&headers);
+        let started = Instant::now();
+        return reject(
+            ProxyError::MethodNotAllowed,
+            &request_id,
+            &method,
+            started,
+            false,
+        );
+    }
+
+    web::serve_index(root.0.as_path(), method == Method::HEAD).await
+}
+
+async fn proxy_inner(
+    handle: Arc<AppHandle>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    peer: Option<Extension<ClientAddr>>,
+    require_auth: bool,
+) -> Response {
     let state = handle.current();
     let request_id = telemetry::request_id(&headers);
     let started = Instant::now();
@@ -126,7 +230,7 @@ async fn proxy(
             is_head,
         );
     }
-    if let Err(error) = state.auth.check(&headers) {
+    if require_auth && let Err(error) = state.auth.check(&headers) {
         let error = match error {
             AuthError::Misconfigured => ProxyError::Internal,
             AuthError::Missing | AuthError::Invalid => ProxyError::Unauthorized,

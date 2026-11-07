@@ -27,7 +27,7 @@ async fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let loaded = match Config::load(&args.config) {
+    let loaded = match Config::load_with(&args.config, args.static_dir.clone()) {
         Ok(loaded) => loaded,
         Err(error) => {
             eprintln!("configuration error: {error}");
@@ -75,25 +75,50 @@ async fn main() -> ExitCode {
         None
     };
 
+    let web_dir = loaded.config.web.dir.clone();
+    let web_enabled = loaded.config.web.enabled();
+    let web_expose_api = loaded.config.web.expose_api;
+
     info!(
         listen = %address,
         allowlist_rules = state.policy.allowlist_len(),
         signing = state.signer.enabled(),
+        web_static = web_enabled,
+        web_api = web_expose_api,
         "alps listening"
     );
     if metrics_enabled {
         info!(listen = %metrics_address, "metrics listener started");
     }
+    if web_enabled {
+        tracing::warn!(
+            "public web UI enabled: GET/HEAD /?url= is unauthenticated and bounded only by the allowlist"
+        );
+        if web_expose_api {
+            tracing::warn!("web.expose_api = true: JSON API routes remain on the public listener");
+        }
+    }
 
     let handle = AppHandle::new(state);
+    let reload_web_dir = web_dir.clone();
+    let app = if let Some(static_dir) = web_dir {
+        routes::web_router(Arc::clone(&handle), static_dir)
+    } else {
+        routes::router(Arc::clone(&handle))
+    };
     let config = Arc::new(loaded.config);
-    spawn_reload_task(args.config.clone(), Arc::clone(&handle));
+    spawn_reload_task(
+        args.config.clone(),
+        args.static_dir.clone(),
+        reload_web_dir,
+        Arc::clone(&handle),
+    );
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut servers = JoinSet::new();
     servers.spawn(server::serve(
         listener,
-        routes::router(Arc::clone(&handle)),
+        app,
         Arc::clone(&config),
         wait_for_shutdown(shutdown_rx.clone()),
     ));
@@ -146,6 +171,7 @@ async fn main() -> ExitCode {
 
 struct Args {
     config: PathBuf,
+    static_dir: Option<PathBuf>,
     check_config: bool,
     help: bool,
 }
@@ -154,6 +180,7 @@ fn parse_args() -> Result<Args, String> {
     let mut config = std::env::var_os("ALPS_CONFIG")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
+    let mut static_dir = None;
     let mut check_config = false;
     let mut help = false;
     let mut args = std::env::args().skip(1);
@@ -164,10 +191,17 @@ fn parse_args() -> Result<Args, String> {
                 let value = args.next().ok_or("--config requires a path")?;
                 config = Some(PathBuf::from(value));
             }
+            "--static-dir" => {
+                let value = args.next().ok_or("--static-dir requires a path")?;
+                static_dir = Some(PathBuf::from(value));
+            }
             "--check-config" => check_config = true,
             "--help" | "-h" => help = true,
             other if other.starts_with("--config=") => {
                 config = Some(PathBuf::from(&other["--config=".len()..]));
+            }
+            other if other.starts_with("--static-dir=") => {
+                static_dir = Some(PathBuf::from(&other["--static-dir=".len()..]));
             }
             other => return Err(format!("unknown argument {other}")),
         }
@@ -175,6 +209,7 @@ fn parse_args() -> Result<Args, String> {
 
     Ok(Args {
         config: config.unwrap_or_else(default_config_path),
+        static_dir,
         check_config,
         help,
     })
@@ -218,7 +253,7 @@ fn binary_dir() -> PathBuf {
 
 fn print_usage() {
     println!(
-        "alps {}\n\nUSAGE:\n    alps [OPTIONS]\n\nOPTIONS:\n    --config <PATH>     Configuration file (default: ALPS_CONFIG,\n                        $HOME/.coinfig/alps/alps.toml, $HOME/.alps.toml,\n                        or <exe dir>/alps.toml)\n    --check-config      Validate configuration and exit\n    -h, --help          Print this help",
+        "alps {}\n\nUSAGE:\n    alps [OPTIONS]\n\nOPTIONS:\n    --config <PATH>     Configuration file (default: ALPS_CONFIG,\n                        $HOME/.coinfig/alps/alps.toml, $HOME/.alps.toml,\n                        or <exe dir>/alps.toml)\n    --static-dir <PATH> Serve the built web UI from this directory\n                        (overrides web.dir and ALPS_STATIC_DIR)\n    --check-config      Validate configuration and exit\n    -h, --help          Print this help",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -231,7 +266,12 @@ async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
 }
 
 #[cfg(unix)]
-fn spawn_reload_task(path: PathBuf, handle: Arc<AppHandle>) {
+fn spawn_reload_task(
+    path: PathBuf,
+    static_dir: Option<PathBuf>,
+    web_dir: Option<PathBuf>,
+    handle: Arc<AppHandle>,
+) {
     let mut signal = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) {
         Ok(signal) => signal,
         Err(error) => {
@@ -241,7 +281,8 @@ fn spawn_reload_task(path: PathBuf, handle: Arc<AppHandle>) {
     };
     tokio::spawn(async move {
         while signal.recv().await.is_some() {
-            match alps::app::reload_from_path(&path) {
+            match alps::app::reload_from_path_with(&path, static_dir.as_deref(), web_dir.as_deref())
+            {
                 Ok(state) => {
                     handle.replace(state);
                     tracing::info!("configuration reloaded");
@@ -255,7 +296,13 @@ fn spawn_reload_task(path: PathBuf, handle: Arc<AppHandle>) {
 }
 
 #[cfg(not(unix))]
-fn spawn_reload_task(_path: PathBuf, _handle: Arc<AppHandle>) {}
+fn spawn_reload_task(
+    _path: PathBuf,
+    _static_dir: Option<PathBuf>,
+    _web_dir: Option<PathBuf>,
+    _handle: Arc<AppHandle>,
+) {
+}
 
 async fn shutdown_signal() {
     let ctrl_c = async {
