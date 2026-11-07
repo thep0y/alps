@@ -108,14 +108,22 @@ impl ValidatedTarget {
 #[derive(Debug, Clone)]
 pub struct UrlPolicy {
     allowlist: Allowlist,
+    redirect_allowlist: Allowlist,
     allow_http: bool,
     max_url_length: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValidationMode {
+    Initial,
+    Redirect,
 }
 
 impl UrlPolicy {
     pub fn from_config(config: &Config) -> Self {
         Self {
             allowlist: Allowlist::compile(&config.allowlist),
+            redirect_allowlist: Allowlist::compile(&config.redirect_allowlist),
             allow_http: config.proxy.allow_http,
             max_url_length: config.proxy.max_url_length,
         }
@@ -123,6 +131,10 @@ impl UrlPolicy {
 
     pub fn allowlist_len(&self) -> usize {
         self.allowlist.len()
+    }
+
+    pub fn redirect_allowlist_len(&self) -> usize {
+        self.redirect_allowlist.len()
     }
 
     /// Validate a raw URL string coming from a request or a Location header.
@@ -141,18 +153,34 @@ impl UrlPolicy {
             return Err(PolicyError::TooLong);
         }
         let url = Url::parse(normalized.as_ref()).map_err(|_| PolicyError::InvalidUrl)?;
-        self.validate_parsed(url)
+        self.validate_parsed(url, ValidationMode::Initial)
     }
 
-    /// Validate a URL that has already been parsed (used for redirects).
+    /// Validate an already-parsed initial target.
     pub fn validate_url(&self, url: Url) -> Result<ValidatedTarget, PolicyError> {
         if url.as_str().len() > self.max_url_length {
             return Err(PolicyError::TooLong);
         }
-        self.validate_parsed(url)
+        self.validate_parsed(url, ValidationMode::Initial)
     }
 
-    fn validate_parsed(&self, mut url: Url) -> Result<ValidatedTarget, PolicyError> {
+    /// Validate an already-parsed redirect target.
+    ///
+    /// The normal allowlist is checked first; a redirect-only rule may also
+    /// permit the hop. This never permits a redirect-only host as the initial
+    /// target because `validate` and `validate_url` use Initial mode.
+    pub fn validate_redirect_url(&self, url: Url) -> Result<ValidatedTarget, PolicyError> {
+        if url.as_str().len() > self.max_url_length {
+            return Err(PolicyError::TooLong);
+        }
+        self.validate_parsed(url, ValidationMode::Redirect)
+    }
+
+    fn validate_parsed(
+        &self,
+        mut url: Url,
+        mode: ValidationMode,
+    ) -> Result<ValidatedTarget, PolicyError> {
         let scheme = match url.scheme() {
             "https" => Scheme::Https,
             "http" => Scheme::Http,
@@ -177,7 +205,12 @@ impl UrlPolicy {
 
         let port = url.port_or_known_default().ok_or(PolicyError::InvalidUrl)?;
 
-        if !self.allowlist.permits(&host, scheme, port, url.path()) {
+        let permitted = self.allowlist.permits(&host, scheme, port, url.path())
+            || (mode == ValidationMode::Redirect
+                && self
+                    .redirect_allowlist
+                    .permits(&host, scheme, port, url.path()));
+        if !permitted {
             return Err(PolicyError::DestinationDenied);
         }
 
@@ -425,6 +458,67 @@ mod tests {
         let url = Url::parse("https://evil.example/x").unwrap();
         assert_eq!(
             policy.validate_url(url),
+            Err(PolicyError::DestinationDenied)
+        );
+    }
+
+    #[test]
+    fn redirect_only_target_cannot_be_an_initial_target() {
+        let mut config = config_with(vec![rule("files.example.org", false)], false);
+        config.redirect_allowlist = vec![rule("release-assets.githubusercontent.com", false)];
+        let policy = UrlPolicy::from_config(&config);
+
+        assert_eq!(
+            policy.validate("https://release-assets.githubusercontent.com/x"),
+            Err(PolicyError::DestinationDenied)
+        );
+        let url = Url::parse("https://release-assets.githubusercontent.com/x").unwrap();
+        assert_eq!(
+            policy.validate_url(url.clone()),
+            Err(PolicyError::DestinationDenied)
+        );
+        assert!(policy.validate_redirect_url(url).is_ok());
+    }
+
+    #[test]
+    fn normal_allowlist_also_permits_redirects() {
+        let url = Url::parse("https://files.example.org/x").unwrap();
+        assert!(policy().validate_redirect_url(url).is_ok());
+    }
+
+    #[test]
+    fn redirect_only_rules_keep_scheme_port_and_path_checks() {
+        let mut redirect = rule("release-assets.githubusercontent.com", false);
+        redirect.schemes = vec!["http".into()];
+        redirect.ports = vec![8443];
+        redirect.path_prefixes = vec!["/github-production-".into()];
+        let mut config = config_with(vec![rule("files.example.org", false)], true);
+        config.redirect_allowlist = vec![redirect];
+        let policy = UrlPolicy::from_config(&config);
+
+        assert!(
+            policy
+                .validate_redirect_url(
+                    Url::parse(
+                        "http://release-assets.githubusercontent.com:8443/github-production-release-asset/x"
+                    )
+                    .unwrap()
+                )
+                .is_ok()
+        );
+        assert_eq!(
+            policy.validate_redirect_url(
+                Url::parse("http://release-assets.githubusercontent.com:8443/other").unwrap()
+            ),
+            Err(PolicyError::DestinationDenied)
+        );
+        assert_eq!(
+            policy.validate_redirect_url(
+                Url::parse(
+                    "https://release-assets.githubusercontent.com:8443/github-production-release-asset/x"
+                )
+                .unwrap()
+            ),
             Err(PolicyError::DestinationDenied)
         );
     }

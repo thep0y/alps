@@ -65,7 +65,7 @@ Dependency direction: `http -> {policy, upstream, limits, auth, telemetry}`; `up
 4. Bearer authentication; skipped when `auth.mode=none`.
 5. Reject GET/HEAD with a body (400).
 6. Parse the `url` parameter (percent-decode, no form `+` conversion), check length/control characters.
-7. `UrlPolicy::validate`: normalize a missing scheme to HTTPS, then check scheme, port, userinfo, fragment, IP literals and allowlist.
+7. `UrlPolicy::validate`: normalize a missing scheme to HTTPS, then check scheme, port, userinfo, fragment, IP literals and the initial allowlist. Redirect-only rules are not consulted here.
 8. Global RPS -> global concurrency permit.
 9. RedirectController: pre-resolve -> send (header timeout) -> validate/loop/hop per 3xx -> final response.
 10. Final response: status + header filtering + Content-Disposition.
@@ -86,7 +86,7 @@ Dependency direction: `http -> {policy, upstream, limits, auth, telemetry}`; `up
 
 - Follow only 301/302/303/307/308; 304 is a final response; 300/305/306 are upstream protocol errors.
 - Missing/non-UTF-8/unparseable `Location` -> 502 `upstream_redirect_error`.
-- The next hop goes through `UrlPolicy::validate_url`: invalid URL -> 502; policy rejection -> 403 `destination_denied`.
+- The next hop goes through `UrlPolicy::validate_redirect_url`: invalid URL -> 502; policy rejection -> 403 `destination_denied`. It matches either the normal or the redirect-only allowlist; redirect-only rules never authorize an initial target.
 - Loop detection uses a set of normalized URLs (including query); default hop limit is 5.
 - GET/HEAD keeps its method across 301/302/303/307/308 (no body-replay issue).
 

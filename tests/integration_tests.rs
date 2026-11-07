@@ -177,6 +177,59 @@ async fn rejects_redirect_to_unlisted_host() {
 }
 
 #[tokio::test]
+async fn follows_redirect_to_redirect_allowlisted_host() {
+    let port = common::start_upstream().await;
+    let mut config = common::config_for(port, &[], true);
+    let mut redirect = config.allowlist[0].clone();
+    redirect.host = "redirect.test".into();
+    config.redirect_allowlist = vec![redirect];
+    config.validate(None).unwrap();
+
+    let state = common::state_for(
+        config,
+        common::resolver_for(&[("upstream.test", port), ("redirect.test", port)]),
+        None,
+    );
+    let response = common::send(
+        state,
+        Method::GET,
+        common::proxy_uri(&target(port, "/redirect-to-redirect-host")),
+        &[],
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(common::body_bytes(response).await, common::FILE_BODY);
+}
+
+#[tokio::test]
+async fn redirect_allowlist_target_is_not_an_initial_target() {
+    let port = common::start_upstream().await;
+    let mut config = common::config_for(port, &[], true);
+    let mut redirect = config.allowlist[0].clone();
+    redirect.host = "redirect.test".into();
+    config.redirect_allowlist = vec![redirect];
+    config.validate(None).unwrap();
+
+    let state = common::state_for(
+        config,
+        common::resolver_for(&[("upstream.test", port), ("redirect.test", port)]),
+        None,
+    );
+    let response = common::send(
+        state,
+        Method::GET,
+        common::proxy_uri(&format!("http://redirect.test:{port}/file")),
+        &[],
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = common::body_bytes(response).await;
+    assert!(String::from_utf8_lossy(&body).contains("destination_denied"));
+}
+
+#[tokio::test]
 async fn rejects_unlisted_host() {
     let port = common::start_upstream().await;
     let state = common::state_for(

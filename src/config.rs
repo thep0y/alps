@@ -37,6 +37,10 @@ pub struct Config {
     pub web: WebConfig,
     #[serde(default)]
     pub allowlist: Vec<AllowlistRule>,
+    /// Hosts/schemes/ports/paths allowed only as redirect targets. The initial
+    /// request must still match `allowlist`.
+    #[serde(default)]
+    pub redirect_allowlist: Vec<AllowlistRule>,
     #[serde(default)]
     pub logging: LoggingConfig,
 }
@@ -809,61 +813,12 @@ impl Config {
         if self.allowlist.is_empty() {
             tracing::warn!("allowlist is empty: every proxy request will be denied");
         }
-        for (index, rule) in self.allowlist.iter_mut().enumerate() {
-            let field = format!("allowlist[{index}]");
-            rule.host = normalize_host(&rule.host)
-                .ok_or_else(|| invalid(&format!("{field}.host"), "expected a DNS domain name"))?;
-
-            if rule.schemes.is_empty() {
-                return Err(invalid(&format!("{field}.schemes"), "must not be empty"));
-            }
-            rule.schemes.sort();
-            rule.schemes.dedup();
-            for scheme in &rule.schemes {
-                match scheme.as_str() {
-                    "https" => {}
-                    "http" => {
-                        if !self.proxy.allow_http {
-                            return Err(invalid(
-                                &format!("{field}.schemes"),
-                                "http requires proxy.allow_http = true",
-                            ));
-                        }
-                    }
-                    other => {
-                        return Err(invalid(
-                            &format!("{field}.schemes"),
-                            format!("unsupported scheme '{other}'"),
-                        ));
-                    }
-                }
-            }
-
-            if rule.ports.is_empty() {
-                return Err(invalid(&format!("{field}.ports"), "must not be empty"));
-            }
-            rule.ports.sort_unstable();
-            rule.ports.dedup();
-            if rule.ports.contains(&0) {
-                return Err(invalid(&format!("{field}.ports"), "port 0 is not usable"));
-            }
-            if rule.path_prefixes.len() > 16 {
-                return Err(invalid(
-                    &format!("{field}.path_prefixes"),
-                    "at most 16 path prefixes are supported",
-                ));
-            }
-            for (path_index, prefix) in rule.path_prefixes.iter_mut().enumerate() {
-                if !valid_path_prefix(prefix) {
-                    return Err(invalid(
-                        &format!("{field}.path_prefixes[{path_index}]"),
-                        "must start with '/', contain no control/space, '?' or '#', no '.'/'..' segments, and be at most 1024 bytes",
-                    ));
-                }
-            }
-            rule.path_prefixes.sort();
-            rule.path_prefixes.dedup();
-        }
+        validate_allowlist_rules(&mut self.allowlist, self.proxy.allow_http, "allowlist")?;
+        validate_allowlist_rules(
+            &mut self.redirect_allowlist,
+            self.proxy.allow_http,
+            "redirect_allowlist",
+        )?;
 
         Ok(())
     }
@@ -900,9 +855,10 @@ impl Config {
     /// Short, secret-free summary used by --check-config and startup logs.
     pub fn summary(&self) -> String {
         format!(
-            "listen={} allowlist_rules={} auth_mode={:?} signing={} metrics={} http2={} cors_origins={} web_static={} web_api={} max_active_streams={} max_redirects={}",
+            "listen={} allowlist_rules={} redirect_allowlist_rules={} auth_mode={:?} signing={} metrics={} http2={} cors_origins={} web_static={} web_api={} max_active_streams={} max_redirects={}",
             self.server.listen,
             self.allowlist.len(),
+            self.redirect_allowlist.len(),
             self.auth.mode,
             self.signing.enabled,
             self.metrics.enabled,
@@ -1005,6 +961,69 @@ fn decode_secret(value: &str) -> Option<Vec<u8>> {
     }
     let raw = value.as_bytes();
     (raw.len() >= 32).then(|| raw.to_vec())
+}
+
+fn validate_allowlist_rules(
+    rules: &mut [AllowlistRule],
+    allow_http: bool,
+    prefix: &str,
+) -> Result<(), ConfigError> {
+    for (index, rule) in rules.iter_mut().enumerate() {
+        let field = format!("{prefix}[{index}]");
+        rule.host = normalize_host(&rule.host)
+            .ok_or_else(|| invalid(&format!("{field}.host"), "expected a DNS domain name"))?;
+
+        if rule.schemes.is_empty() {
+            return Err(invalid(&format!("{field}.schemes"), "must not be empty"));
+        }
+        rule.schemes.sort();
+        rule.schemes.dedup();
+        for scheme in &rule.schemes {
+            match scheme.as_str() {
+                "https" => {}
+                "http" => {
+                    if !allow_http {
+                        return Err(invalid(
+                            &format!("{field}.schemes"),
+                            "http requires proxy.allow_http = true",
+                        ));
+                    }
+                }
+                other => {
+                    return Err(invalid(
+                        &format!("{field}.schemes"),
+                        format!("unsupported scheme '{other}'"),
+                    ));
+                }
+            }
+        }
+
+        if rule.ports.is_empty() {
+            return Err(invalid(&format!("{field}.ports"), "must not be empty"));
+        }
+        rule.ports.sort_unstable();
+        rule.ports.dedup();
+        if rule.ports.contains(&0) {
+            return Err(invalid(&format!("{field}.ports"), "port 0 is not usable"));
+        }
+        if rule.path_prefixes.len() > 16 {
+            return Err(invalid(
+                &format!("{field}.path_prefixes"),
+                "at most 16 path prefixes are supported",
+            ));
+        }
+        for (path_index, prefix) in rule.path_prefixes.iter_mut().enumerate() {
+            if !valid_path_prefix(prefix) {
+                return Err(invalid(
+                    &format!("{field}.path_prefixes[{path_index}]"),
+                    "must start with '/', contain no control/space, '?' or '#', no '.'/'..' segments, and be at most 1024 bytes",
+                ));
+            }
+        }
+        rule.path_prefixes.sort();
+        rule.path_prefixes.dedup();
+    }
+    Ok(())
 }
 
 fn valid_path_prefix(value: &str) -> bool {
@@ -1248,6 +1267,38 @@ ports = [443]
 
         cfg.allowlist[0].path_prefixes = vec!["/releases/".to_string()];
         assert!(cfg.validate(Some("0123456789abcdef")).is_ok());
+    }
+
+    #[test]
+    fn redirect_allowlist_rules_are_normalized_and_validated() {
+        let mut cfg = base();
+        let mut redirect = cfg.allowlist[0].clone();
+        redirect.host = "RELEASE-ASSETS.githubusercontent.com.".into();
+        redirect.path_prefixes = vec!["/github-production-".into()];
+        cfg.redirect_allowlist = vec![redirect];
+        cfg.validate(Some("0123456789abcdef")).unwrap();
+        assert_eq!(
+            cfg.redirect_allowlist[0].host,
+            "release-assets.githubusercontent.com"
+        );
+        assert!(cfg.summary().contains("redirect_allowlist_rules=1"));
+
+        cfg.redirect_allowlist[0].host = "127.0.0.1".into();
+        let error = cfg.validate(Some("0123456789abcdef")).unwrap_err();
+        assert!(error.to_string().contains("redirect_allowlist[0].host"));
+    }
+
+    #[test]
+    fn redirect_allowlist_http_requires_allow_http() {
+        let mut cfg = base();
+        let mut redirect = cfg.allowlist[0].clone();
+        redirect.schemes = vec!["http".into()];
+        cfg.redirect_allowlist = vec![redirect];
+        let error = cfg.validate(Some("0123456789abcdef")).unwrap_err();
+        assert!(error.to_string().contains("redirect_allowlist[0].schemes"));
+
+        cfg.proxy.allow_http = true;
+        cfg.validate(Some("0123456789abcdef")).unwrap();
     }
 
     #[test]

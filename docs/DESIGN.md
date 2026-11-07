@@ -54,7 +54,7 @@ Range: bytes=1048576-
 
 For Range-capable upstreams, ALPS returns `206 Partial Content`, `Content-Range` and the file body chunks. If the upstream does not support Range, ALPS does not fabricate a partial response; upstream behavior is preserved.
 
-URL constraints: a single target URL defaults to 8 KiB maximum; after decoding only HTTP(S) URLs are allowed, and a scheme-less target is normalized to HTTPS; usernames, passwords, fragments (@#...@) and control characters are rejected. Preserve the original query semantics of signed URLs: do not reorder query parameters or arbitrarily modify percent-encoding. Compatibility-test signed links from different object stores. Never log full URLs or query strings at normal levels.
+URL constraints: a single target URL defaults to 8 KiB maximum; after decoding only HTTP(S) URLs are allowed, and a scheme-less target is normalized to HTTPS; usernames, passwords, fragments (@#...@) and control characters are rejected. Preserve the original query semantics of signed URLs: do not reorder query parameters or arbitrarily modify percent-encoding. Compatibility-test signed links from different object stores. Never log full URLs or query strings at normal levels. Every redirect hop is revalidated; an optional `[[redirect_allowlist]]` can authorize CDN-only redirect targets without making them valid initial targets (ADR-012).
 
 ### 2.2 Request/response behavior
 
