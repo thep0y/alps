@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "alps"
-version = "0.1.1-alpha.7"
+version = "0.1.1-alpha.8"
 dependencies = [
  "arc-swap",
  "axum",
