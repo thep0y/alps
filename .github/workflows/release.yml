@@ -108,11 +108,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Restore release cache
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+
+      - name: Restore cross cache
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: alps-v1
-          shared-key: release
+          shared-key: cross-release
           save-if: false
 
       - name: Apply the release version
@@ -127,7 +130,10 @@ jobs:
           echo "building ${TAG} on x86_64"
 
       - name: Build x86_64
-        run: cargo build --release --locked
+        run: cross build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Check x86_64 glibc compatibility
+        run: python3 scripts/check_glibc.py target/x86_64-unknown-linux-gnu/release/alps --max 2.18
 
       - name: Package x86_64
         shell: bash
@@ -135,7 +141,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           tar -czf "dist/alps-${TAG}-x86_64-unknown-linux-gnu.tar.gz" \
-            -C target/release alps
+            -C target/x86_64-unknown-linux-gnu/release alps
 
       - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
@@ -183,6 +189,9 @@ jobs:
 
       - name: Build aarch64
         run: cross build --release --locked --target aarch64-unknown-linux-gnu
+
+      - name: Check aarch64 glibc compatibility
+        run: python3 scripts/check_glibc.py target/aarch64-unknown-linux-gnu/release/alps --max 2.18
 
       - name: Package aarch64
         shell: bash
