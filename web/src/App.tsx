@@ -1,4 +1,5 @@
 import { For, Match, Show, Switch, createMemo, createSignal } from "solid-js";
+import brandIcon from "./assets/icon-light-on-dark.svg";
 import { type FeatureIconName, t } from "./lib/i18n";
 import { ProxyRequestError, probeTarget, proxyUrl } from "./lib/proxy";
 import { TargetError, normalizeTarget } from "./lib/target";
@@ -86,12 +87,12 @@ export default function App() {
       <div class="relative mx-auto flex min-h-dvh w-full max-w-4xl flex-col px-5 sm:px-8">
         <header class="flex items-center justify-between gap-4 py-7">
           <div class="flex items-center gap-3">
-            <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-indigo-200 shadow-lg shadow-slate-900/15">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5" aria-hidden="true">
-                <path d="M12 4v11m0 0 4-4m-4 4-4-4" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" stroke-linecap="round" />
-              </svg>
-            </div>
+            <img
+              src={brandIcon}
+              alt=""
+              aria-hidden="true"
+              class="h-10 w-10 shrink-0 rounded-2xl shadow-lg shadow-slate-900/15"
+            />
             <div>
               <p class="text-sm font-semibold tracking-tight text-slate-950">{t.brand}</p>
               <p class="text-xs text-slate-500">{t.brandSubtitle}</p>
